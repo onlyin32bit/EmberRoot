@@ -1,0 +1,7 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "api",
+  "compatibility_date": "2025-08-03",
+  "compatibility_flags": [""],
+  "main": "./src/index.tsx"
+}
