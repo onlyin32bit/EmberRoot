@@ -1,2 +1,14 @@
-<h1>Welcome to SvelteKit</h1>
-<p>Visit <a href="https://svelte.dev/docs/kit">svelte.dev/docs/kit</a> to read the documentation</p>
+<script lang="ts">
+	import PageShell from '$lib/components/PageShell.svelte';
+</script>
+
+<svelte:head>
+	<title>Dashboard — EmberRoot</title>
+	<meta name="description" content="EmberRoot dashboard — overview of system status and key metrics." />
+</svelte:head>
+
+<PageShell
+	title="Dashboard"
+	subtitle="System overview and key performance indicators"
+	breadcrumb={['EmberRoot', 'Dashboard']}
+/>
