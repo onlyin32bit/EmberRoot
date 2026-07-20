@@ -6,7 +6,6 @@
 #include <Adafruit_MLX90614.h>
 #include <SoftwareSerial.h>
 
-// Fallback configuration for MQTT if not defined in .env
 #ifndef MQTT_BROKER
 #define MQTT_BROKER "tcp://broker.hivemq.com:1883"
 #endif
@@ -31,38 +30,37 @@
 #define MQTT_TOPIC "emberroot/sensors"
 #endif
 
-// Định nghĩa chân
 #define DHTPIN 7
 #define DHTTYPE DHT11
 #define MQ2_PIN A0
 #define MQ7_PIN A1
 #define SOIL_PIN A2
 
-// Khởi tạo thư viện
 DHT dht(DHTPIN, DHTTYPE);
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
-SoftwareSerial simSerial(2, 3); // D2: RX (nối TX SIM), D3: TX (nối RX SIM)
+SoftwareSerial simSerial(2, 3);
 
-// Khai báo hàm trước khi sử dụng trong C++
 void publishMQTT(String payload);
 
-void setup() {
+void setup()
+{
   Serial.begin(9600);
   simSerial.begin(115200);
   dht.begin();
   mlx.begin();
-  
+
   LoRa.setPins(10, 9, 8);
-  if (!LoRa.begin(433E6)) {
+  if (!LoRa.begin(433E6))
+  {
     Serial.println("LoRa init failed!");
   }
-  
+
   Serial.println("System Initializing...");
-  delay(10000); // Đợi module A7680C khởi động
+  delay(10000);
 }
 
-void loop() {
-  // 1. Đọc cảm biến
+void loop()
+{
   float t = dht.readTemperature();
   float h = dht.readHumidity();
   float tempObj = mlx.readObjectTempC();
@@ -70,62 +68,52 @@ void loop() {
   int mq7 = analogRead(MQ7_PIN);
   int soil = analogRead(SOIL_PIN);
 
-  // 2. Tạo chuỗi dữ liệu JSON (để gửi lên Server)
-  String data = "{\"t\":" + String(t) + ",\"h\":" + String(h) + 
-                ",\"tempObj\":" + String(tempObj) + 
-                ",\"mq2\":" + String(mq2) + 
-                ",\"mq7\":" + String(mq7) + 
+  String data = "{\"t\":" + String(t) + ",\"h\":" + String(h) +
+                ",\"tempObj\":" + String(tempObj) +
+                ",\"mq2\":" + String(mq2) +
+                ",\"mq7\":" + String(mq7) +
                 ",\"soil\":" + String(soil) + "}";
 
-  // 3. Hiển thị lên máy tính để kiểm tra
   Serial.println("Data to send: " + data);
-
-  // 4. Gửi dữ liệu qua A7680C bằng lệnh AT (MQTT Publish)
   publishMQTT(data);
 
-  delay(60000); // Gửi 1 phút/lần để tiết kiệm Data/Pin
+  delay(60000);
 }
 
-void publishMQTT(String payload) {
+void publishMQTT(String payload)
+{
   Serial.println("Publishing to MQTT broker...");
 
-  // 1. Khởi động dịch vụ MQTT
   simSerial.println("AT+CMQTTSTART");
   delay(1000);
 
-  // 2. Thiết lập Client ID
   simSerial.println("AT+CMQTTACCQ=0,\"" + String(MQTT_CLIENT_ID) + "\"");
   delay(1000);
 
-  // 3. Kết nối đến MQTT Broker
-  // Cú pháp: AT+CMQTTCONNECT=0,"tcp://broker:port",keepalive,clean_session[,"user","password"]
   String connectCmd = "AT+CMQTTCONNECT=0,\"" + String(MQTT_BROKER) + "\",60,1";
   String username = String(MQTT_USER);
   String password = String(MQTT_PASS);
-  if (username != "" && username != "your_mqtt_username") {
+  if (username != "" && username != "your_mqtt_username")
+  {
     connectCmd += ",\"" + username + "\",\"" + password + "\"";
   }
   simSerial.println(connectCmd);
   delay(3000);
 
-  // 4. Thiết lập Topic gửi
   String topic = String(MQTT_TOPIC);
   simSerial.println("AT+CMQTTTOPIC=0," + String(topic.length()));
   delay(1000);
   simSerial.print(topic);
   delay(1000);
 
-  // 5. Thiết lập Payload gửi
   simSerial.println("AT+CMQTTPAYLOAD=0," + String(payload.length()));
   delay(1000);
   simSerial.print(payload);
   delay(1000);
 
-  // 6. Thực hiện Publish dữ liệu (QoS 1, timeout 60s)
   simSerial.println("AT+CMQTTPUB=0,1,60");
   delay(3000);
 
-  // 7. Ngắt kết nối và giải phóng tài nguyên
   simSerial.println("AT+CMQTTDISC=0,120");
   delay(1000);
   simSerial.println("AT+CMQTTRELEASE=0");
