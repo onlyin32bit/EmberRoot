@@ -9,6 +9,9 @@ import type {
 	SensorNode,
 	SensorType,
 	Telemetry,
+	Hotspot,
+	NodeHealth,
+	ConfidenceScore,
 	Alert,
 	AlertCategory,
 	Incident,
@@ -91,6 +94,75 @@ export function generateRegions(count = 8): Region[] {
 	return Array.from({ length: count }, (_, i) => generateRegion(i));
 }
 
+export const U_MINH_CENTER: LatLon = { lat: 9.66, lon: 105.04 };
+
+export function generateUminhRegion(): Region {
+	return {
+		id: 'RG-UMINH-01',
+		name: 'U Minh Forest',
+		code: 'UM-01',
+		terrain: 'forest',
+		center: U_MINH_CENTER,
+		boundingBox: {
+			sw: { lat: U_MINH_CENTER.lat - 0.08, lon: U_MINH_CENTER.lon - 0.10 },
+			ne: { lat: U_MINH_CENTER.lat + 0.08, lon: U_MINH_CENTER.lon + 0.10 }
+		},
+		areaSqKm: 450,
+		population: 0,
+		sensorCount: 56,
+		activeIncidents: randInt(1, 3),
+		riskLevel: scoreToSeverity(randInt(40, 95)),
+		commandPostId: 'CP-UMINH-01'
+	};
+}
+
+export function generateUminhSensors(region: Region, count = 56): SensorNode[] {
+	return Array.from({ length: count }, (_, index) => {
+		const battery = randInt(6, 100);
+		const locLat = parseFloat((region.center.lat + (rand() - 0.5) * 0.14).toFixed(5));
+		const locLon = parseFloat((region.center.lon + (rand() - 0.5) * 0.16).toFixed(5));
+		return {
+			id: uid('UM', index + 1),
+			name: `UM Sensor ${String(index + 1).padStart(2, '0')}`,
+			type: weightedPick(SENSOR_TYPES, SENSOR_TYPE_WEIGHTS),
+			regionId: region.id,
+			location: { lat: locLat, lon: locLon },
+			elevation: randInt(1, 80),
+			status: sensorStatus(battery),
+			batteryPct: battery,
+			signalStrength: randInt(-110, -48),
+			firmwareVersion: pick(FIRMWARE_VERSIONS),
+			lastSeenAt: msAgo(randInt(120_000, battery < 15 ? 4_500_000 : 160_000)),
+			deployedAt: daysAgo(randInt(10, 540))
+		};
+	});
+}
+
+export function generateUminhTelemetryMap(sensors: SensorNode[]): Map<string, Telemetry> {
+	const map = new Map<string, Telemetry>();
+	for (const sensor of sensors) {
+		const telemetry = generateTelemetry(sensor);
+		map.set(sensor.id, telemetry);
+	}
+	return map;
+}
+
+export function generateFirmsHotspots(region: Region, count = 12): Hotspot[] {
+	return Array.from({ length: count }, (_, index) => {
+		const lat = parseFloat((region.center.lat + (rand() - 0.5) * 0.14).toFixed(5));
+		const lon = parseFloat((region.center.lon + (rand() - 0.5) * 0.14).toFixed(5));
+		const intensity = randInt(40, 98);
+		return {
+			id: uid('HS', index + 1),
+			location: { lat, lon },
+			intensity,
+			confidence: Math.max(50, Math.min(100, intensity + randInt(-12, 6))),
+			detectedAt: Date.now() - randInt(10_000, 1_200_000),
+			type: 'thermal'
+		};
+	});
+}
+
 // ─── SensorNode ───────────────────────────────────────────────────────────────
 
 const SENSOR_TYPES: SensorType[] = ['thermal', 'smoke', 'wind', 'humidity', 'co2', 'seismic', 'visual', 'lidar'];
@@ -147,6 +219,10 @@ export function generateTelemetry(sensor: SensorNode): Telemetry {
 	const baseTemp = randFloat(18, 42);
 	const baseSmoke = randFloat(0, 0.7, 3);
 	const baseWind = randFloat(0, 55);
+	const baseCo2 = randInt(380, 1800);
+	const baseCo = randInt(0, 28);
+	const baseMoisture = randFloat(12, 48, 1);
+	const baseGroundwater = randFloat(-4.5, -1.6);
 
 	return {
 		id: shortId(),
@@ -156,15 +232,28 @@ export function generateTelemetry(sensor: SensorNode): Telemetry {
 		humidity: randFloat(12, 85),
 		windSpeed: baseWind,
 		windDirection: randInt(0, 359),
-		co2Ppm: randInt(380, 1800),
+		coPpm: baseCo,
+		co2Ppm: baseCo2,
 		smokeIndex: baseSmoke,
 		particulateMatter: randFloat(0, 250, 1),
 		pressure: randFloat(985, 1025),
 		uvIndex: randFloat(0, 11, 1),
+		soilMoisture: baseMoisture,
+		groundwaterLevel: baseGroundwater,
+		loraRssi: sensor.signalStrength,
+		loraSnr: parseFloat(randFloat(6, 18, 1).toFixed(1)),
+		batteryPct: sensor.batteryPct,
+		signalStrength: sensor.signalStrength,
 		history: {
 			temperature: makeSeries(baseTemp, 48, 1_800_000, 2.5, [0, 60]),
 			smokeIndex: makeSeries(baseSmoke, 48, 1_800_000, 0.05, [0, 1]),
-			windSpeed: makeSeries(baseWind, 48, 1_800_000, 5, [0, 120])
+			windSpeed: makeSeries(baseWind, 48, 1_800_000, 5, [0, 120]),
+			coPpm: makeSeries(baseCo, 48, 1_800_000, 1.5, [0, 50]),
+			co2Ppm: makeSeries(baseCo2, 48, 1_800_000, 30, [350, 2200]),
+			soilMoisture: makeSeries(baseMoisture, 48, 1_800_000, 2.4, [8, 55]),
+			groundwaterLevel: makeSeries(baseGroundwater, 48, 1_800_000, 0.12, [-5.5, -1.2]),
+			batteryPct: makeSeries(sensor.batteryPct, 48, 1_800_000, 0.8, [0, 100]),
+			signalStrength: makeSeries(sensor.signalStrength, 48, 1_800_000, 2.5, [-120, -30])
 		}
 	};
 }
@@ -177,6 +266,59 @@ export function generateTelemetryMap(sensors: SensorNode[]): Map<string, Telemet
 		}
 	}
 	return map;
+}
+
+const CALIBRATION_STATUSES = ['Calibrated', 'Drifted', 'Recalibration Needed'] as const;
+const MAINTENANCE_NOTES = [
+	'Replace sensor within 24h',
+	'Inspect antenna and cabling',
+	'Validate CO₂ calibration',
+	'Schedule full maintenance check',
+	'Battery replacement recommended soon'
+];
+
+export function generateNodeHealth(sensor: SensorNode): NodeHealth {
+	const drift = parseFloat((rand() * 0.18).toFixed(2));
+	const calib = pick(CALIBRATION_STATUSES);
+	const score = Math.max(0, Math.min(100, sensor.batteryPct - drift * 40 + (sensor.signalStrength + 120) / 2));
+
+	return {
+		sensorId: sensor.id,
+		batteryPct: sensor.batteryPct,
+		firmwareVersion: sensor.firmwareVersion,
+		calibrationStatus: calib,
+		signalStrength: sensor.signalStrength,
+		sensorDrift: drift,
+		maintenanceRecommendation: pick(MAINTENANCE_NOTES),
+		lastSeenAt: sensor.lastSeenAt
+	};
+}
+
+export function generateConfidenceScore(sensor: SensorNode): ConfidenceScore {
+	const score = Math.min(100, Math.max(5, Math.round(sensor.batteryPct * 0.6 + (sensor.signalStrength + 120) * 0.3 + randInt(0, 30))));
+	const label = score >= 75 ? 'Critical' : score >= 55 ? 'High' : score >= 35 ? 'Moderate' : 'Low';
+	const level: Severity = score >= 75 ? 'critical' : score >= 55 ? 'high' : score >= 35 ? 'medium' : 'low';
+	const explanation = [
+		`Temperature change consistent with smoldering activity`,
+		`CO₂ elevated relative to surrounding baseline`,
+		`${sensor.signalStrength} dBm signal suggests stable connectivity`,
+		`${sensor.batteryPct}% battery remaining`
+	];
+
+	return {
+		sensorId: sensor.id,
+		score,
+		label,
+		riskLevel: level,
+		factors: {
+			temperature: score > 65 ? 'Strong upward trend' : 'Moderate',
+			co2: score > 55 ? 'Elevated' : 'Stable',
+			moisture: score > 70 ? 'Low' : 'Acceptable',
+			signal: score > 50 ? 'Stable' : 'Weak'
+		},
+		explanation,
+		updatedAt: Date.now() - randInt(120_000, 1_800_000)
+	};
 }
 
 // ─── Alert ────────────────────────────────────────────────────────────────────

@@ -29,9 +29,9 @@
 		</div>
 	</div>
 
-	<!-- Empty body slot -->
+	<!-- Page body slot -->
 	<div class="page__body">
-		<!-- Content will be added here -->
+		<slot />
 	</div>
 </div>
 

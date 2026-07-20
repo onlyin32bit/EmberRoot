@@ -21,13 +21,21 @@ import {
 	generateAlerts,
 	generateIncidents,
 	generateWeatherMap,
-	generateRiskIndexMap
+	generateRiskIndexMap,
+	generateNodeHealth,
+	generateConfidenceScore,
+	generateUminhRegion,
+	generateUminhSensors,
+	generateFirmsHotspots
 } from './generators.js';
 
 import type {
 	Region,
 	SensorNode,
 	Telemetry,
+	NodeHealth,
+	ConfidenceScore,
+	Hotspot,
 	Alert,
 	Incident,
 	Weather,
@@ -56,16 +64,28 @@ class MockDataStore {
 	private _incidents:  Incident[]               | null = null;
 	private _weather:    Map<string, Weather>     | null = null;
 	private _riskIndex:  Map<string, RiskIndex>   | null = null;
+	private _nodeHealth: Map<string, NodeHealth>  | null = null;
+	private _confidence: Map<string, ConfidenceScore> | null = null;
+	private _hotspots: Map<string, Hotspot[]> | null = null;
 
 	private boot() {
 		setSeed(CONFIG.seed);
-		this._regions   = generateRegions(CONFIG.regionCount);
-		this._sensors   = generateSensorNodes(this._regions, CONFIG.sensorsPerRegion);
+		const regions = generateRegions(CONFIG.regionCount);
+		const uMinhRegion = generateUminhRegion();
+		this._regions = [...regions, uMinhRegion];
+
+		const standardSensors = generateSensorNodes(regions, CONFIG.sensorsPerRegion);
+		const uMinhSensors = generateUminhSensors(uMinhRegion, 56);
+		this._sensors = [...standardSensors, ...uMinhSensors];
+
 		this._telemetry = generateTelemetryMap(this._sensors);
-		this._alerts    = generateAlerts(this._sensors, this._regions, CONFIG.alertCount);
+		this._alerts = generateAlerts(this._sensors, this._regions, CONFIG.alertCount);
 		this._incidents = generateIncidents(this._regions, CONFIG.incidentCount);
-		this._weather   = generateWeatherMap(this._regions);
+		this._weather = generateWeatherMap(this._regions);
 		this._riskIndex = generateRiskIndexMap(this._regions);
+		this._nodeHealth = new Map(this._sensors.map(s => [s.id, generateNodeHealth(s)]));
+		this._confidence = new Map(this._sensors.map(s => [s.id, generateConfidenceScore(s)]));
+		this._hotspots = new Map(this._regions.map((region) => [region.id, generateFirmsHotspots(region)]));
 	}
 
 	private get regions()   { if (!this._regions)   this.boot(); return this._regions!; }
@@ -75,6 +95,8 @@ class MockDataStore {
 	private get incidents() { if (!this._incidents) this.boot(); return this._incidents!; }
 	private get weather()   { if (!this._weather)   this.boot(); return this._weather!; }
 	private get riskIndex() { if (!this._riskIndex) this.boot(); return this._riskIndex!; }
+	private get nodeHealth() { if (!this._nodeHealth) this.boot(); return this._nodeHealth!; }
+	private get confidence() { if (!this._confidence) this.boot(); return this._confidence!; }
 
 	// ── Regions ──────────────────────────────────────────────────────────────
 
@@ -116,6 +138,14 @@ class MockDataStore {
 
 	getAllTelemetry(): Telemetry[] {
 		return Array.from(this.telemetry.values());
+	}
+
+	getNodeHealth(sensorId: string): NodeHealth | undefined {
+		return this.nodeHealth.get(sensorId);
+	}
+
+	getConfidenceScore(sensorId: string): ConfidenceScore | undefined {
+		return this.confidence.get(sensorId);
 	}
 
 	// ── Alerts ────────────────────────────────────────────────────────────────
@@ -176,6 +206,10 @@ class MockDataStore {
 
 	getAllRiskIndices(): RiskIndex[] {
 		return Array.from(this.riskIndex.values());
+	}
+
+	getHotspotsForRegion(regionId: string): Hotspot[] {
+		return this.hotspots.get(regionId) ?? [];
 	}
 
 	getHighRiskRegions(minComposite = 60): RiskIndex[] {
@@ -251,6 +285,8 @@ class MockDataStore {
 		this._incidents = null;
 		this._weather   = null;
 		this._riskIndex = null;
+		this._nodeHealth = null;
+		this._confidence = null;
 	}
 }
 

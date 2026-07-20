@@ -50,16 +50,66 @@ export interface Telemetry {
 	humidity: number;               // %
 	windSpeed: number;              // km/h
 	windDirection: number;          // degrees 0–359
+	coPpm: number;
 	co2Ppm: number;
 	smokeIndex: number;             // 0–1 normalised
 	particulateMatter: number;      // µg/m³ PM2.5
 	pressure: number;               // hPa
 	uvIndex: number;                // 0–11
+	soilMoisture: number;           // % volumetric water content
+	groundwaterLevel: number;       // metres below surface
+	loraRssi: number;               // dBm
+	loraSnr: number;                // dB
+	batteryPct: number;             // 0–100
+	signalStrength: number;         // dBm
 	history: {
 		temperature: TimeSeries;
 		smokeIndex: TimeSeries;
 		windSpeed: TimeSeries;
+		coPpm: TimeSeries;
+		co2Ppm: TimeSeries;
+		soilMoisture: TimeSeries;
+		groundwaterLevel: TimeSeries;
+		batteryPct: TimeSeries;
+		signalStrength: TimeSeries;
 	};
+}
+
+export type TelemetryRecord = Telemetry;
+
+export interface Hotspot {
+	id: string;
+	location: LatLon;
+	intensity: number;              // 0–100
+	confidence: number;             // 0–100
+	detectedAt: number;
+	type: 'satellite' | 'thermal' | 'smoke';
+}
+
+export interface NodeHealth {
+	sensorId: string;
+	batteryPct: number;             // 0–100
+	firmwareVersion: string;
+	calibrationStatus: 'Calibrated' | 'Drifted' | 'Recalibration Needed';
+	signalStrength: number;         // dBm
+	sensorDrift: number;            // unitless drift score
+	maintenanceRecommendation: string;
+	lastSeenAt: number;
+}
+
+export interface ConfidenceScore {
+	sensorId: string;
+	score: number;                  // 0–100
+	label: 'Low' | 'Moderate' | 'High' | 'Critical';
+	riskLevel: Severity;
+	factors: {
+		temperature: string;
+		co2: string;
+		moisture: string;
+		signal: string;
+	};
+	explanation: string[];
+	updatedAt: number;
 }
 
 // ─── Alert ────────────────────────────────────────────────────────────────────

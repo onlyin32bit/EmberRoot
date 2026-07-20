@@ -34,12 +34,12 @@ export function randFloat(min: number, max: number, dp = 2): number {
 }
 
 /** Pick one item from an array */
-export function pick<T>(arr: T[]): T {
+export function pick<T>(arr: readonly T[]): T {
 	return arr[Math.floor(rand() * arr.length)];
 }
 
 /** Pick N unique items from an array */
-export function pickN<T>(arr: T[], n: number): T[] {
+export function pickN<T>(arr: readonly T[], n: number): T[] {
 	const copy = [...arr];
 	const result: T[] = [];
 	for (let i = 0; i < Math.min(n, copy.length); i++) {

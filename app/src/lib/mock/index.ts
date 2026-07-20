@@ -24,29 +24,25 @@ export type {
 	SensorNode,
 	SensorType,
 	Telemetry,
-	Alert,
-	AlertCategory,
-	Incident,
-	IncidentType,
-	IncidentStatus,
-	IncidentUpdate,
-	Region,
-	TerrainType,
-	Weather,
-	WeatherCondition,
-	WeatherForecastSlot,
-	RiskIndex,
-	RiskFactor
+	Hotspot,
+	RiskFactor,
+	NodeHealth,
+	ConfidenceScore
 } from './types.js';
 
 // Raw generators (for custom one-off usage or Storybook-style component testing)
 export {
 	generateRegion,
 	generateRegions,
+	generateUminhRegion,
 	generateSensorNode,
 	generateSensorNodes,
 	generateTelemetry,
 	generateTelemetryMap,
+	generateUminhSensors,
+	generateFirmsHotspots,
+	generateNodeHealth,
+	generateConfidenceScore,
 	generateAlert,
 	generateAlerts,
 	generateIncident,
