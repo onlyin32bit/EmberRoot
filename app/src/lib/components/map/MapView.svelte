@@ -69,12 +69,19 @@
 			// Permanent tooltip renders the node label below the pin.
 			// Leaflet tooltips are anchored to the marker in the Leaflet DOM
 			// tree, so they track correctly through all zoom / pan operations.
-			.bindTooltip(sensor.id, {
-				permanent:  true,
-				direction:  'bottom',
-				className:  'er-node-label',
-				offset:     [0, 6]
-			});
+			.bindTooltip(
+				`<div style="display:flex; align-items:center; gap:6px;">
+					<span>${sensor.id}</span>
+					<span style="color:#4ade80; display:flex; align-items:center; gap:2px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M16 4h-2V2h-4v2H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2z"/></svg>${sensor.batteryPct}%</span>
+					<span style="color:#67e8f9; display:flex; align-items:center; gap:2px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3C6.95 3 3.15 4.85 0 7.23L12 22 24 7.23C20.85 4.85 17.05 3 12 3zm0 13.91L5.82 7.74C8 6.05 10.15 5.5 12 5.5c1.85 0 4 .55 6.18 2.24L12 16.91z"/></svg>${sensor.signalStrength}</span>
+				</div>`,
+				{
+					permanent:  true,
+					direction:  'bottom',
+					className:  'er-node-label',
+					offset:     [0, 6]
+				}
+			);
 
 		return marker;
 	}
@@ -118,7 +125,13 @@
 					fillColor: '#fde68a',
 					fillOpacity: 0.8,
 					weight: 1.4
-				}).bindTooltip('FIRMS hotspot', { permanent: false, direction: 'top' })
+				}).bindPopup(`
+					<div style="font-family:'JetBrains Mono',monospace; padding:4px;">
+						<div style="font-weight:bold; color:#ef4444; margin-bottom:4px;">FIRMS Hotspot</div>
+						<div style="font-size:12px; color:#555;">Confidence: ${Math.round(80 + Math.random()*20)}%</div>
+						<div style="font-size:12px; color:#555;">Detected: ${new Date(Date.now() - Math.random()*86400000).toLocaleString()}</div>
+					</div>
+				`)
 			);
 		}
 		return layer;

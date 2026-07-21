@@ -8,6 +8,7 @@ import TelemetryDrawer from '$lib/components/map/TelemetryDrawer.svelte';
 import LayerControl from '$lib/components/map/LayerControl.svelte';
 import MapLegend from '$lib/components/map/MapLegend.svelte';
 import SearchPanel from '$lib/components/map/SearchPanel.svelte';
+import FilterBar from '$lib/components/map/FilterBar.svelte';
 
 const regionId = 'RG-UMINH-01';
 const region = mockService.getRegion(regionId);
@@ -35,6 +36,13 @@ let activeLayers = $state({
 let searchResults = $state<{ id: string; title: string; details: string; coords: [number, number] }[]>([]);
 let mapReady = $state(false);
 let drawerOpen = $state(initialSensorId !== null);
+let filterStatus = $state<string | null>(null);
+
+const filteredSensors = $derived(
+	filterStatus === null
+		? sensors
+		: sensors.filter((s) => s.status === filterStatus)
+);
 
 const legendItems = [
 	{ label: 'Normal', color: '#22c55e' },
@@ -137,7 +145,7 @@ breadcrumb={['EmberRoot', 'Spatial Map']}
 <div class="map-container">
 {#if mapReady}
 <MapView
-sensors={sensors}
+sensors={filteredSensors}
 selectedId={selectedSensorId}
 onSelectSensor={selectSensor}
 activeLayers={activeLayers}
@@ -146,6 +154,8 @@ onMousePosition={updateMousePosition}
 {/if}
 
 <div class="map-overlays">
+	<FilterBar onFilter={(status) => (filterStatus = status)} />
+
 	<SearchPanel
 		results={searchResults}
 		onSearch={runSearch}

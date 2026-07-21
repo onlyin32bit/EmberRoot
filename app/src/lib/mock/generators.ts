@@ -216,20 +216,21 @@ export function generateSensorNodes(regions: Region[], countPerRegion = 12): Sen
 // ─── Telemetry ────────────────────────────────────────────────────────────────
 
 export function generateTelemetry(sensor: SensorNode): Telemetry {
-	const baseTemp = randFloat(18, 42);
-	const baseSmoke = randFloat(0, 0.7, 3);
-	const baseWind = randFloat(0, 55);
-	const baseCo2 = randInt(380, 1800);
-	const baseCo = randInt(0, 28);
-	const baseMoisture = randFloat(12, 48, 1);
+	const baseTemp        = randFloat(18, 42);
+	const baseSmoke       = randFloat(0, 0.7, 3);
+	const baseWind        = randFloat(0, 55);
+	const baseCo2         = randInt(380, 1800);
+	const baseCo          = randInt(0, 28);
+	const baseMoisture    = randFloat(12, 48, 1);
 	const baseGroundwater = randFloat(-4.5, -1.6);
+	const baseHumidity    = randFloat(12, 85);
 
 	return {
 		id: shortId(),
 		sensorId: sensor.id,
 		timestamp: sensor.lastSeenAt,
 		temperature: baseTemp,
-		humidity: randFloat(12, 85),
+		humidity: baseHumidity,
 		windSpeed: baseWind,
 		windDirection: randInt(0, 359),
 		coPpm: baseCo,
@@ -244,19 +245,32 @@ export function generateTelemetry(sensor: SensorNode): Telemetry {
 		loraSnr: parseFloat(randFloat(6, 18, 1).toFixed(1)),
 		batteryPct: sensor.batteryPct,
 		signalStrength: sensor.signalStrength,
+		// 7-day history at 30-min intervals (336 points)
 		history: {
-			temperature: makeSeries(baseTemp, 48, 1_800_000, 2.5, [0, 60]),
-			smokeIndex: makeSeries(baseSmoke, 48, 1_800_000, 0.05, [0, 1]),
-			windSpeed: makeSeries(baseWind, 48, 1_800_000, 5, [0, 120]),
-			coPpm: makeSeries(baseCo, 48, 1_800_000, 1.5, [0, 50]),
-			co2Ppm: makeSeries(baseCo2, 48, 1_800_000, 30, [350, 2200]),
-			soilMoisture: makeSeries(baseMoisture, 48, 1_800_000, 2.4, [8, 55]),
-			groundwaterLevel: makeSeries(baseGroundwater, 48, 1_800_000, 0.12, [-5.5, -1.2]),
-			batteryPct: makeSeries(sensor.batteryPct, 48, 1_800_000, 0.8, [0, 100]),
-			signalStrength: makeSeries(sensor.signalStrength, 48, 1_800_000, 2.5, [-120, -30])
+			temperature:     makeSeries(baseTemp,              336, 1_800_000, 2.5,  [0, 60]),
+			humidity:        makeSeries(baseHumidity,          336, 1_800_000, 3,    [5, 100]),
+			smokeIndex:      makeSeries(baseSmoke,             336, 1_800_000, 0.05, [0, 1]),
+			windSpeed:       makeSeries(baseWind,              336, 1_800_000, 5,    [0, 120]),
+			coPpm:           makeSeries(baseCo,                336, 1_800_000, 1.5,  [0, 50]),
+			co2Ppm:          makeSeries(baseCo2,               336, 1_800_000, 30,   [350, 2200]),
+			soilMoisture:    makeSeries(baseMoisture,          336, 1_800_000, 2.4,  [8, 55]),
+			groundwaterLevel: makeSeries(baseGroundwater,      336, 1_800_000, 0.12, [-5.5, -1.2]),
+			batteryPct:      makeSeries(sensor.batteryPct,     336, 1_800_000, 0.8,  [0, 100]),
+			signalStrength:  makeSeries(sensor.signalStrength, 336, 1_800_000, 2.5,  [-120, -30])
+		},
+		// 30-day daily summaries (1 point per day)
+		history30d: {
+			temperature:     makeSeries(baseTemp,              30, 86_400_000, 5,    [0, 60]),
+			humidity:        makeSeries(baseHumidity,          30, 86_400_000, 6,    [5, 100]),
+			co2Ppm:          makeSeries(baseCo2,               30, 86_400_000, 60,   [350, 2200]),
+			soilMoisture:    makeSeries(baseMoisture,          30, 86_400_000, 4,    [8, 55]),
+			groundwaterLevel: makeSeries(baseGroundwater,      30, 86_400_000, 0.25, [-5.5, -1.2]),
+			batteryPct:      makeSeries(sensor.batteryPct,     30, 86_400_000, 1.5,  [0, 100]),
+			signalStrength:  makeSeries(sensor.signalStrength, 30, 86_400_000, 5,    [-120, -30])
 		}
 	};
 }
+
 
 export function generateTelemetryMap(sensors: SensorNode[]): Map<string, Telemetry> {
 	const map = new Map<string, Telemetry>();

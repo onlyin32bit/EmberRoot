@@ -64,9 +64,20 @@ export interface Telemetry {
 	signalStrength: number;         // dBm
 	history: {
 		temperature: TimeSeries;
+		humidity: TimeSeries;
 		smokeIndex: TimeSeries;
 		windSpeed: TimeSeries;
 		coPpm: TimeSeries;
+		co2Ppm: TimeSeries;
+		soilMoisture: TimeSeries;
+		groundwaterLevel: TimeSeries;
+		batteryPct: TimeSeries;
+		signalStrength: TimeSeries;
+	};
+	/** 30-day daily summaries — one point per calendar day */
+	history30d: {
+		temperature: TimeSeries;
+		humidity: TimeSeries;
 		co2Ppm: TimeSeries;
 		soilMoisture: TimeSeries;
 		groundwaterLevel: TimeSeries;
