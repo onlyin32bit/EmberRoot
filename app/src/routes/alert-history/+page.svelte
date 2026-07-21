@@ -9,7 +9,10 @@
 	import SideDrawer from '$lib/components/ui/SideDrawer.svelte';
 	import { mockService } from '$lib/mock';
 	import { goto } from '$app/navigation';
-	import type { Incident, IncidentStatus, IncidentType, Region, Severity } from '$lib/mock/types';
+	import type { Incident, IncidentStatus, IncidentType, Region, Severity, Alert } from '$lib/mock/types';
+
+	let viewMode = $state<'incidents' | 'alerts'>('alerts');
+	const alerts: Alert[] = mockService.getAlerts();
 
 	// Load data from mock service
 	const incidents: Incident[] = mockService.getIncidents();
@@ -138,11 +141,59 @@
 			})
 	);
 
+	const filteredAlerts = $derived(
+		alerts
+			.filter((item) => {
+				if (searchQuery.trim()) {
+					const q = searchQuery.toLowerCase();
+					const matchId = item.id.toLowerCase().includes(q);
+					const matchCategory = item.category.toLowerCase().includes(q);
+					const regName = regionMap.get(item.regionId)?.name.toLowerCase() ?? '';
+					const matchRegion = regName.includes(q);
+
+					if (!matchId && !matchCategory && !matchRegion) {
+						return false;
+					}
+				}
+
+				if (selectedSeverity && item.severity !== selectedSeverity) {
+					return false;
+				}
+
+				if (selectedRegion && item.regionId !== selectedRegion) {
+					return false;
+				}
+
+				if (selectedStatus) {
+					const isResolved = Boolean(item.resolvedAt);
+					if (selectedStatus === 'resolved' ? !isResolved : isResolved) {
+						return false;
+					}
+				}
+
+				if (selectedDateRange) {
+					const now = Date.now();
+					const ageMs = now - item.triggeredAt;
+					if (selectedDateRange === '24h' && ageMs > 86_400_000) return false;
+					if (selectedDateRange === '7d' && ageMs > 7 * 86_400_000) return false;
+					if (selectedDateRange === '30d' && ageMs > 30 * 86_400_000) return false;
+				}
+
+				return true;
+			})
+			.sort((a, b) => {
+				if (sortBy === 'date-desc') return b.triggeredAt - a.triggeredAt;
+				if (sortBy === 'date-asc') return a.triggeredAt - b.triggeredAt;
+				if (sortBy === 'severity-desc')
+					return severityWeight[b.severity] - severityWeight[a.severity];
+				return 0;
+			})
+	);
+
 	// Summary Stats
 	const totalCount = $derived(incidents.length);
 	const activeCount = $derived(incidents.filter((i) => i.status === 'active').length);
 	const criticalCount = $derived(incidents.filter((i) => i.severity === 'critical').length);
-	const totalEvacuated = $derived(incidents.reduce((sum, i) => sum + i.evacuated, 0));
 	const totalAreaAffected = $derived(
 		incidents.reduce((sum, i) => sum + i.affectedAreaKm2, 0).toFixed(1)
 	);
@@ -223,7 +274,8 @@
 
 	function openDrawer(incident: Incident, event?: Event) {
 		if (event) event.stopPropagation();
-		goto(`/alerts/${incident.id}`);
+		drawerIncident = incident;
+		drawerOpen = true;
 	}
 
 	function resetFilters() {
@@ -259,6 +311,12 @@
 		</div>
 	{/if}
 
+	<div class="view-toggle" style="margin-bottom: 20px; display: flex; gap: 8px;">
+		<Button variant={viewMode === 'alerts' ? 'primary' : 'secondary'} onclick={() => viewMode = 'alerts'}>Alerts</Button>
+		<Button variant={viewMode === 'incidents' ? 'primary' : 'secondary'} onclick={() => viewMode = 'incidents'}>Incidents</Button>
+	</div>
+
+	{#if viewMode === 'incidents'}
 	<div class="incidents-page">
 		<!-- Summary Stat Cards -->
 		<div class="stats-row">
@@ -289,12 +347,12 @@
 
 			<Card padding="md" class="stat-card">
 				<div class="stat-header">
-					<span class="stat-label">Evacuated Residents</span>
-					<span class="stat-icon-bg">🚨</span>
+					<span class="stat-label">Total Affected Area</span>
+					<span class="stat-icon-bg">🌍</span>
 				</div>
 				<div class="stat-body">
-					<span class="stat-value text-ember">{totalEvacuated.toLocaleString()}</span>
-					<span class="stat-sub">Across {totalAreaAffected} km² affected area</span>
+					<span class="stat-value text-ember">{totalAreaAffected}</span>
+					<span class="stat-sub">Square kilometers under monitoring</span>
 				</div>
 			</Card>
 
@@ -392,7 +450,6 @@
 									class="incident-row"
 									class:row-expanded={isExpanded}
 									class:row-critical={incident.severity === 'critical'}
-									onclick={() => goto(`/alerts/${incident.id}`)}
 								>
 									<td class="td-expand">
 										<button
@@ -471,7 +528,7 @@
 									</td>
 
 									<td class="td-actions">
-										<div class="actions-cell" onclick={(e) => e.stopPropagation()}>
+										<div class="actions-cell">
 											<Button
 												variant="secondary"
 												size="sm"
@@ -505,11 +562,6 @@
 															<div class="param-item">
 																<span class="param-label">Affected Area</span>
 																<span class="param-value">{incident.affectedAreaKm2.toFixed(1)} km²</span>
-															</div>
-
-															<div class="param-item">
-																<span class="param-label">Evacuated</span>
-																<span class="param-value">{incident.evacuated.toLocaleString()} persons</span>
 															</div>
 
 															<div class="param-item">
@@ -594,6 +646,162 @@
 			{/if}
 		</Card>
 	</div>
+	{:else}
+	<div class="alerts-page">
+		<div class="stats-row">
+			<Card padding="md" class="stat-card">
+				<div class="stat-header">
+					<span class="stat-label">Total Alerts</span>
+					<span class="stat-icon-bg">🚨</span>
+				</div>
+				<div class="stat-body">
+					<span class="stat-value">{alerts.length}</span>
+					<span class="stat-sub">Recent signals in the forest network</span>
+				</div>
+			</Card>
+
+			<Card padding="md" class="stat-card">
+				<div class="stat-header">
+					<span class="stat-label">Active Alerts</span>
+					<span class="stat-icon-bg">⚡</span>
+				</div>
+				<div class="stat-body">
+					<span class="stat-value text-critical">{alerts.filter((alert) => !alert.resolvedAt).length}</span>
+					<span class="stat-sub">Requires monitoring and response</span>
+				</div>
+			</Card>
+
+			<Card padding="md" class="stat-card">
+				<div class="stat-header">
+					<span class="stat-label">Critical Signals</span>
+					<span class="stat-icon-bg">🔥</span>
+				</div>
+				<div class="stat-body">
+					<span class="stat-value text-ember">{alerts.filter((alert) => alert.severity === 'critical').length}</span>
+					<span class="stat-sub">Highest priority fire-risk alerts</span>
+				</div>
+			</Card>
+
+			<Card padding="md" class="stat-card">
+				<div class="stat-header">
+					<span class="stat-label">Latest Activity</span>
+					<span class="stat-icon-bg">🕒</span>
+				</div>
+				<div class="stat-body">
+					<span class="stat-value text-online">{formatTimeAgo(alerts[0]?.triggeredAt ?? Date.now())}</span>
+					<span class="stat-sub">Most recent alert timestamp</span>
+				</div>
+			</Card>
+		</div>
+
+		<Card padding="md" class="filters-card">
+			<div class="toolbar-wrapper">
+				<div class="search-box">
+					<SearchBar
+						placeholder="Search by alert ID, category, or region..."
+						bind:value={searchQuery}
+					/>
+				</div>
+
+				<div class="filters-group">
+					<Dropdown options={severityOptions} bind:value={selectedSeverity} placeholder="Severity" />
+					<Dropdown options={regionOptions} bind:value={selectedRegion} placeholder="Region" />
+					<Dropdown options={statusOptions} bind:value={selectedStatus} placeholder="Status" />
+					<Dropdown options={dateRangeOptions} bind:value={selectedDateRange} placeholder="Time Period" />
+					<Dropdown options={sortOptions} bind:value={sortBy} placeholder="Sort By" />
+
+					{#if searchQuery || selectedSeverity || selectedRegion || selectedStatus || selectedDateRange}
+						<Button variant="ghost" size="sm" onclick={resetFilters}>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+							</svg>
+							Clear
+						</Button>
+					{/if}
+				</div>
+			</div>
+
+			<div class="results-meta">
+				<span>
+					Showing <strong>{filteredAlerts.length}</strong> of <strong>{alerts.length}</strong> alerts
+				</span>
+				{#if selectedSeverity || selectedRegion || selectedStatus || selectedDateRange || searchQuery}
+					<span class="active-filter-pills">
+						{#if selectedSeverity}<Badge variant="ember">Severity: {selectedSeverity}</Badge>{/if}
+						{#if selectedRegion}<Badge variant="neutral">Region: {regionMap.get(selectedRegion)?.name ?? selectedRegion}</Badge>{/if}
+						{#if selectedStatus}<Badge variant="neutral">Status: {selectedStatus}</Badge>{/if}
+						{#if selectedDateRange}<Badge variant="neutral">Time: {selectedDateRange}</Badge>{/if}
+					</span>
+				{/if}
+			</div>
+		</Card>
+
+		<Card padding="none" class="table-card">
+			{#if filteredAlerts.length === 0}
+				<div class="empty-state">
+					<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="empty-icon">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+					</svg>
+					<h3>No alerts found</h3>
+					<p>Try adjusting the filters to surface the latest forest monitoring signals.</p>
+					<Button variant="secondary" size="sm" onclick={resetFilters}>Reset Filters</Button>
+				</div>
+			{:else}
+				<div class="table-scroll-container">
+					<table class="incidents-table">
+						<thead>
+							<tr>
+								<th class="th-title">Alert Details</th>
+								<th class="th-type">Category</th>
+								<th class="th-severity">Severity</th>
+								<th class="th-region">Region</th>
+								<th class="th-date">Triggered At</th>
+								<th class="th-status">Status</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each filteredAlerts as alert}
+								<tr class="incident-row" class:row-critical={alert.severity === 'critical'} onclick={() => goto(`/alerts/${alert.id}`)}>
+									<td class="td-title">
+										<div class="title-cell">
+											<span class="incident-name">{alert.category.replace('_', ' ')}</span>
+											<span class="incident-id">{alert.id}</span>
+										</div>
+									</td>
+									<td class="td-type">
+										<span class="type-tag">{alert.category.replace('_', ' ')}</span>
+									</td>
+									<td class="td-severity">
+										<Badge variant={getSeverityBadgeVariant(alert.severity)}>{alert.severity}</Badge>
+									</td>
+									<td class="td-region">
+										<div class="region-cell">
+											<span class="region-name">{regionMap.get(alert.regionId)?.name ?? alert.regionId}</span>
+											<span class="region-code">{regionMap.get(alert.regionId)?.code ?? 'N/A'}</span>
+										</div>
+									</td>
+									<td class="td-date">
+										<div class="date-cell">
+											<span class="date-full">{formatDate(alert.triggeredAt)}</span>
+											<span class="date-relative">{formatTimeAgo(alert.triggeredAt)}</span>
+										</div>
+									</td>
+									<td class="td-status">
+										{#if alert.resolvedAt}
+											<Badge variant="online">Resolved</Badge>
+										{:else}
+											<Badge variant="critical">Active</Badge>
+										{/if}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+		</Card>
+	</div>
+	{/if}
 </PageShell>
 
 <!-- Side Drawer Detail View -->
@@ -655,8 +863,8 @@
 						<span class="d-stat-val">{drawerIncident.affectedAreaKm2.toFixed(1)} km²</span>
 					</div>
 					<div class="drawer-stat-item">
-						<span class="d-stat-label">Evacuated</span>
-						<span class="d-stat-val text-ember">{drawerIncident.evacuated.toLocaleString()}</span>
+						<span class="d-stat-label">Casualties</span>
+						<span class="d-stat-val text-warning">{drawerIncident.casualties.toLocaleString()}</span>
 					</div>
 					<div class="drawer-stat-item">
 						<span class="d-stat-label">Reported Time</span>
@@ -754,7 +962,8 @@
 		}
 	}
 
-	.incidents-page {
+	.incidents-page,
+	.alerts-page {
 		display: flex;
 		flex-direction: column;
 		gap: 20px;

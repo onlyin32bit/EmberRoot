@@ -133,7 +133,6 @@ export type AlertCategory =
 	| 'sensor_offline'
 	| 'battery_low'
 	| 'wind_shift'
-	| 'perimeter_breach'
 	| 'co2_threshold'
 	| 'signal_lost';
 
@@ -179,7 +178,6 @@ export interface Incident {
 	estimatedControlAt: number | null;
 	assignedUnits: string[];
 	casualties: number;
-	evacuated: number;
 	updates: IncidentUpdate[];
 }
 

@@ -7,10 +7,10 @@
 	import NotificationPanel from './ui/NotificationPanel.svelte';
 
 	const navLinks = [
-		{ label: 'Dashboard',    href: '/'           },
-		{ label: 'Analytics',    href: '/analytics'  },
-		{ label: 'Spatial Map',  href: '/spatial-map'},
-		{ label: 'Reports',      href: '/reports'    },
+		{ label: 'Dashboard',   href: '/' },
+		{ label: 'Monitoring',  href: '/live-monitoring' },
+		{ label: 'Spatial Map', href: '/spatial-map' },
+		{ label: 'Alerts',      href: '/alert-history' },
 	] as const;
 
 	/** Pulse state for the live indicator */

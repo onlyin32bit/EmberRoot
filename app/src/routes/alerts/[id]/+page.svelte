@@ -21,6 +21,10 @@
 	const telemetry = $derived(sensor ? mockService.getTelemetry(sensor.id) : null);
 	const tempSeries = $derived(telemetry?.history.temperature ?? []);
 	const moistureSeries = $derived(telemetry?.history.soilMoisture ?? []);
+	const batterySeries = $derived(telemetry?.history.batteryPct ?? []);
+	const co2Series = $derived(telemetry?.history.co2Ppm ?? []);
+	const smokeSeries = $derived(telemetry?.history.smokeIndex ?? []);
+	const windSeries = $derived(telemetry?.history.windSpeed ?? []);
 	const confidence = $derived(sensor ? mockService.getConfidenceScore(sensor.id) : null);
 
 	function getSeverityBadge(severity: string) {
@@ -96,14 +100,24 @@
 						<p class="subtitle">Data from node <a href={`/spatial-map/node/${sensor.id}`}>{sensor.id}</a></p>
 						
 						<div class="chart-wrapper">
-							<LineAreaChart 
-								series={[
-									{ id: 'temp', label: 'Temperature (°C)', data: tempSeries, color: 'var(--ember-400)' },
-									{ id: 'moisture', label: 'Soil Moisture (%)', data: moistureSeries, color: 'var(--status-online)', filled: false }
-								]} 
-								unit="" 
-								height={250} 
-							/>
+							{#if data.category === 'battery_low'}
+								<LineAreaChart series={[{ id: 'batt', label: 'Battery (%)', data: batterySeries, color: 'var(--status-warning)' }]} unit="" height={250} />
+							{:else if data.category === 'co2_threshold'}
+								<LineAreaChart series={[{ id: 'co2', label: 'CO2 (ppm)', data: co2Series, color: 'var(--status-critical)' }]} unit="" height={250} />
+							{:else if data.category === 'smoke_detected'}
+								<LineAreaChart series={[{ id: 'smoke', label: 'Smoke Index', data: smokeSeries, color: 'var(--text-primary)' }]} unit="" height={250} />
+							{:else if data.category === 'wind_shift'}
+								<LineAreaChart series={[{ id: 'wind', label: 'Wind Speed (kph)', data: windSeries, color: 'var(--status-online)' }]} unit="" height={250} />
+							{:else}
+								<LineAreaChart 
+									series={[
+										{ id: 'temp', label: 'Temperature (°C)', data: tempSeries, color: 'var(--ember-400)' },
+										{ id: 'moisture', label: 'Soil Moisture (%)', data: moistureSeries, color: 'var(--status-online)', filled: false }
+									]} 
+									unit="" 
+									height={250} 
+								/>
+							{/if}
 						</div>
 					</Card>
 				{/if}

@@ -395,9 +395,6 @@ const ALERT_TEMPLATES: Record<AlertCategory, { title: string; message: string; s
 		{ title: 'Rapid Wind Direction Change', message: 'Sustained 42° shift in wind bearing detected over 8 minutes.', severity: 'high' },
 		{ title: 'Wind Gust Alarm', message: 'Gusts exceeding 95 km/h recorded at sensor.', severity: 'critical' }
 	],
-	perimeter_breach: [
-		{ title: 'Perimeter Zone Breach', message: 'Motion detected inside the established exclusion zone.', severity: 'critical' }
-	],
 	co2_threshold: [
 		{ title: 'CO₂ Threshold Exceeded', message: 'Concentration at 1620 ppm, above the 1500 ppm action level.', severity: 'high' }
 	],
@@ -439,8 +436,8 @@ export function generateAlerts(sensors: SensorNode[], regions: Region[], count =
 
 // ─── Incident ─────────────────────────────────────────────────────────────────
 
-const INCIDENT_TYPES: IncidentType[] = ['wildfire', 'structural', 'hazmat', 'search_rescue', 'flood'];
-const INCIDENT_TYPE_WEIGHTS = [4, 2, 2, 1, 1];
+const INCIDENT_TYPES: IncidentType[] = ['wildfire'];
+const INCIDENT_TYPE_WEIGHTS = [1];
 
 const STATUS_BY_SEVERITY: Record<Severity, IncidentStatus[]> = {
 	critical: ['active', 'active', 'monitoring'],
@@ -452,11 +449,11 @@ const STATUS_BY_SEVERITY: Record<Severity, IncidentStatus[]> = {
 const UNIT_POOL = ['Alpha-1', 'Alpha-2', 'Bravo-1', 'Bravo-3', 'Charlie-2', 'Delta-4', 'Eagle-1', 'Falcon-2', 'Ground-7'];
 
 const INCIDENT_TITLES: Record<IncidentType, string[]> = {
-	wildfire:     ['Ridgeline Fire', 'Dry Creek Burn', 'Mesa Blaze', 'Summit Fire Complex', 'Valley Ember'],
-	structural:   ['Industrial Unit Fire', 'Warehouse Structure Fire', 'Residential Blaze'],
-	hazmat:       ['Chemical Spill — Road 12', 'Fuel Leak at Depot', 'Unknown Substance — Grid C4'],
-	search_rescue: ['Missing Hiker — Sector 7', 'Cliff Rescue — North Face', 'Swift Water Rescue'],
-	flood:        ['Flash Flood — Lower Basin', 'River Overflow — East Bank', 'Culvert Failure']
+	wildfire: ['Ridgeline Fire', 'Dry Creek Burn', 'Mesa Blaze', 'Summit Fire Complex', 'Valley Ember'],
+	structural: [''],
+	hazmat: [''],
+	search_rescue: [''],
+	flood: ['']
 };
 
 const UPDATE_MESSAGES = [
@@ -506,7 +503,6 @@ export function generateIncident(index: number, regions: Region[]): Incident {
 		estimatedControlAt: status !== 'resolved' ? hoursAhead(randInt(4, 72)) : null,
 		assignedUnits: pickN(UNIT_POOL, randInt(1, 5)),
 		casualties: randInt(0, severity === 'critical' ? 8 : 2),
-		evacuated: randInt(0, severity === 'critical' ? 3000 : 200),
 		updates
 	};
 }

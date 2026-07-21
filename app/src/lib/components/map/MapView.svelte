@@ -171,10 +171,14 @@
 
 	// Bounding box for U Minh Region (approx W,S,E,N)
 	const UMINH_BBOX = '104.0,9.0,106.0,10.0';
+	// Bounding box for Central Africa to test FIRMS data reliably
+	const TEST_BBOX = '-15.0,5.0,30.0,20.0';
+	let testFirmsMode = $state(false);
 
 	async function fetchFirmsHotspots() {
-		const cacheKey = 'firms_hotspots_cache';
-		const cacheTimeKey = 'firms_hotspots_cache_time';
+		const bbox = testFirmsMode ? TEST_BBOX : UMINH_BBOX;
+		const cacheKey = testFirmsMode ? 'firms_hotspots_cache_test' : 'firms_hotspots_cache';
+		const cacheTimeKey = testFirmsMode ? 'firms_hotspots_cache_time_test' : 'firms_hotspots_cache_time';
 		const now = Date.now();
 		
 		// 15-minute cache TTL
@@ -188,7 +192,7 @@
 
 		try {
 			// NASA FIRMS Area API Endpoint for CSV
-			const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${PUBLIC_FIRMS_MAP_KEY}/VIIRS_SNPP_NRT/${UMINH_BBOX}/1`;
+			const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${PUBLIC_FIRMS_MAP_KEY}/VIIRS_SNPP_NRT/${bbox}/1`;
 			const res = await fetch(url);
 			
 			if (!res.ok) throw new Error('FIRMS API Error');
@@ -381,12 +385,30 @@
 	<div id="emberroot-map" class="map-view"></div>
 	{#if activeLayers.firmsHotspots}
 		<div class="firms-metadata">
-			<span>FIRMS Layer Status:</span>
-			{#if firmsLastUpdated}
-				<span style="color: var(--status-online);">Updated {firmsLastUpdated.toLocaleTimeString()}</span>
-			{:else}
-				<span style="color: var(--status-warning);">Syncing...</span>
-			{/if}
+			<div style="display: flex; gap: 6px;">
+				<span>FIRMS Layer Status:</span>
+				{#if firmsLastUpdated}
+					<span style="color: var(--status-online);">Updated {firmsLastUpdated.toLocaleTimeString()}</span>
+				{:else}
+					<span style="color: var(--status-warning);">Syncing...</span>
+				{/if}
+			</div>
+			
+			<div style="margin-top: 4px; border-top: 1px solid var(--surface-border); padding-top: 4px;">
+				<label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+					<input type="checkbox" bind:checked={testFirmsMode} onchange={async () => {
+						if (map && hotspotLayer && map.hasLayer(hotspotLayer)) {
+							map.removeLayer(hotspotLayer);
+						}
+						firmsLastUpdated = null;
+						hotspotLayer = await addFirmsHotspots();
+						if (activeLayers.firmsHotspots && map) {
+							map.addLayer(hotspotLayer);
+						}
+					}} />
+					<span style="font-size: 11px;">Test Mode (Fetch African Region)</span>
+				</label>
+			</div>
 		</div>
 	{/if}
 </div>
@@ -436,9 +458,9 @@
 		color: #e2e8f0;
 		z-index: 1000;
 		display: flex;
-		gap: 6px;
+		flex-direction: column;
 		backdrop-filter: blur(4px);
 		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-		pointer-events: none;
+		pointer-events: auto;
 	}
 </style>

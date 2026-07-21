@@ -144,7 +144,7 @@
 			docText += `Status:          ${inc.status.toUpperCase()} | Severity: ${inc.severity.toUpperCase()}\n`;
 			docText += `Region:          ${inc.regionId}\n`;
 			docText += `Containment:     ${inc.containmentPct}%\n`;
-			docText += `Affected Area:   ${inc.affectedAreaKm2} sq km | Evacuated: ${inc.evacuated}\n`;
+			docText += `Affected Area:   ${inc.affectedAreaKm2} sq km\n`;
 			docText += `Reported Time:   ${new Date(inc.reportedAt).toLocaleString()}\n`;
 			docText += `Description:     ${inc.description}\n`;
 			docText += `--------------------------------------------------------------------------------\n\n`;

@@ -32,7 +32,7 @@ let activeLayers = $state({
 	riskHeatmap: true,
 	firmsHotspots: true,
 	groundwater: false,
-	moisture: false
+	moisture: true
 });
 let searchResults = $state<{ id: string; title: string; details: string; coords: [number, number] }[]>([]);
 let mapReady = $state(false);
@@ -48,7 +48,6 @@ const filteredSensors = $derived(
 const legendItems = [
 	{ label: 'Normal', color: '#22c55e' },
 	{ label: 'Monitor', color: '#f59e0b' },
-	{ label: 'Suspected', color: '#fb923c' },
 	{ label: 'Warning', color: '#ef4444' },
 	{ label: 'Offline', color: '#374151' }
 ];
@@ -166,11 +165,9 @@ onMousePosition={updateMousePosition}
 	<LayerControl
 		layers={[
 			{ id: 'sensorNodes', label: 'Sensor Nodes', enabled: activeLayers.sensorNodes },
-			{ id: 'sensorConnections', label: 'Sensor Connections', enabled: activeLayers.sensorConnections },
-			{ id: 'riskHeatmap', label: 'Daily Risk Heatmap', enabled: activeLayers.riskHeatmap },
-			{ id: 'firmsHotspots', label: 'FIRMS Hotspots', enabled: activeLayers.firmsHotspots },
-			{ id: 'groundwater', label: 'Groundwater Layer', enabled: activeLayers.groundwater },
-			{ id: 'moisture', label: 'Moisture Layer', enabled: activeLayers.moisture }
+			{ id: 'riskHeatmap', label: 'Fire Risk', enabled: activeLayers.riskHeatmap },
+			{ id: 'firmsHotspots', label: 'Hotspots', enabled: activeLayers.firmsHotspots },
+			{ id: 'moisture', label: 'Moisture', enabled: activeLayers.moisture }
 		]}
 		onToggle={toggleLayer}
 	/>
@@ -182,13 +179,13 @@ onMousePosition={updateMousePosition}
 
 <section class="overview-panel">
 <div class="overview-card">
-<h3>Region Analytics</h3>
+<h3>Watch metrics</h3>
 <ul>
 <li><strong>{sensors.filter((sensor) => sensor.status === 'online').length}</strong> active sensors</li>
-<li><strong>{metricAverage('temperature')}�C</strong> average temperature</li>
+<li><strong>{metricAverage('temperature')}°C</strong> average temperature</li>
 <li><strong>{metricAverage('humidity')}%</strong> average humidity</li>
-<li><strong>{metricAverage('co2Ppm')}</strong> average CO2</li>
-<li><strong>{metricAverage('batteryPct')}%</strong> average battery</li>
+<li><strong>{metricAverage('co2Ppm')}</strong> average CO₂</li>
+<li><strong>{metricAverage('smokeIndex')}</strong> average smoke index</li>
 </ul>
 </div>
 

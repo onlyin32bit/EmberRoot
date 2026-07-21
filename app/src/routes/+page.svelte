@@ -7,16 +7,10 @@
 	import OperationalStatusWidget from '$lib/components/dashboard/OperationalStatusWidget.svelte';
 	import ForestHealthWidget      from '$lib/components/dashboard/ForestHealthWidget.svelte';
 	import ActiveAlertsWidget      from '$lib/components/dashboard/ActiveAlertsWidget.svelte';
-	import SensorCountWidget       from '$lib/components/dashboard/SensorCountWidget.svelte';
-	import WeatherWidget           from '$lib/components/dashboard/WeatherWidget.svelte';
-	import RecentAlertsWidget      from '$lib/components/dashboard/RecentAlertsWidget.svelte';
-	import TelemetryCard           from '$lib/components/dashboard/TelemetryCard.svelte';
-	import OverviewChartWidget     from '$lib/components/dashboard/OverviewChartWidget.svelte';
 
 	// UI Components
 	import Card from '$lib/components/ui/Card.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import Button from '$lib/components/ui/Button.svelte';
 
 	// ── Pull telemetry for representative sensors ─────────────────────────────
 	const resolvedRegionId = $derived($selectedRegionId === 'all' ? null : $selectedRegionId);
@@ -63,27 +57,23 @@
 
 <svelte:head>
 	<title>Dashboard — EmberRoot</title>
-	<meta name="description" content="EmberRoot dashboard — system-wide operational status, alerts, sensor telemetry, and risk overview." />
+	<meta name="description" content="EmberRoot dashboard — wildfire risk, active alerts, and sensor health for the U Minh forest monitoring network." />
 </svelte:head>
 
 <div class="dash">
-	<!-- ── Page header ─────────────────────────────────────────────────────── -->
 	<div class="dash__header">
 		<div class="dash__header-left">
-			<h1 class="dash__title">Dashboard</h1>
-			<p class="dash__subtitle">Live operational overview · Updated {nowStr}</p>
+			<h1 class="dash__title">Forest Watch Dashboard</h1>
+			<p class="dash__subtitle">Focused view of live fire-risk conditions, key sensors, and active alerts · Updated {nowStr}</p>
 		</div>
 		<div class="dash__header-actions">
 			<Badge variant="online">
 				<span class="dash__live-dot"></span>
 				Live
 			</Badge>
-			<Button variant="secondary" size="sm">Export PDF</Button>
-			<Button variant="primary"   size="sm">Deploy Response</Button>
 		</div>
 	</div>
 
-	<!-- ── Row 1 — four top-level stat cards ─────────────────────────────── -->
 	<div class="dash__row dash__row--top">
 		<Card padding="md" class="dash__widget dash__widget--ops">
 			<OperationalStatusWidget />
@@ -94,133 +84,18 @@
 		<Card padding="md" class="dash__widget">
 			<ActiveAlertsWidget />
 		</Card>
-		<Card padding="md" class="dash__widget">
-			<SensorCountWidget />
-		</Card>
 	</div>
 
-	<!-- ── Row 2 — telemetry cards + weather ─────────────────────────────── -->
-	<div class="dash__row dash__row--telem">
-		<!-- Small telemetry cards -->
-		<div class="dash__telem-grid">
-			<TelemetryCard
-				label="Temperature"
-				value={avgTemp.toFixed(1)}
-				unit="°C"
-				variant={avgTemp > 35 ? 'critical' : avgTemp > 28 ? 'warning' : 'default'}
-				trend={avgTemp > 30 ? 'up' : 'stable'}
-				trendLabel="{avgTemp > 30 ? '+' : ''}{(avgTemp - 22).toFixed(1)}° vs baseline"
-				sparkSeries={tempSeries.slice(-24)}
-				formatValue={(n) => n.toFixed(1)}
-			>
-				{#snippet icon()}
-					<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.5 10V5a2.5 2.5 0 00-5 0v5a5.5 5.5 0 105 0z"/></svg>
-				{/snippet}
-			</TelemetryCard>
-
-			<TelemetryCard
-				label="Humidity"
-				value={avgHumidity.toFixed(0)}
-				unit="%"
-				variant={avgHumidity < 20 ? 'critical' : avgHumidity < 35 ? 'warning' : 'online'}
-				trend={avgHumidity < 25 ? 'down' : 'stable'}
-				trendLabel={avgHumidity < 25 ? 'Critically dry' : 'Normal range'}
-			>
-				{#snippet icon()}
-					<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z"/></svg>
-				{/snippet}
-			</TelemetryCard>
-
-			<TelemetryCard
-				label="Wind Speed"
-				value={avgWind.toFixed(0)}
-				unit="km/h"
-				variant={avgWind > 60 ? 'critical' : avgWind > 35 ? 'warning' : 'default'}
-				trend={avgWind > 40 ? 'up' : 'stable'}
-				trendLabel="{avgWind > 40 ? 'High' : 'Normal'}"
-				sparkSeries={windSeries.slice(-24)}
-				formatValue={(n) => n.toFixed(0)}
-			>
-				{#snippet icon()}
-					<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.59 4.59A2 2 0 1111 8H2m10.59 11.41A2 2 0 1014 16H2m15.73-8.27A2.5 2.5 0 1119.5 12H2"/></svg>
-				{/snippet}
-			</TelemetryCard>
-
-			<TelemetryCard
-				label="CO₂"
-				value={Math.round(avgCO2)}
-				unit="ppm"
-				variant={avgCO2 > 1500 ? 'critical' : avgCO2 > 1000 ? 'warning' : 'default'}
-				trend={avgCO2 > 1200 ? 'up' : 'stable'}
-				trendLabel={avgCO2 > 1500 ? 'Above threshold' : 'Normal'}
-			>
-				{#snippet icon()}
-					<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h8M12 8v8"/></svg>
-				{/snippet}
-			</TelemetryCard>
-
-			<TelemetryCard
-				label="Smoke Index"
-				value={(avgSmoke * 100).toFixed(0)}
-				unit="%"
-				variant={avgSmoke > 0.6 ? 'critical' : avgSmoke > 0.3 ? 'warning' : 'online'}
-				trend={avgSmoke > 0.3 ? 'up' : 'down'}
-				trendLabel={avgSmoke > 0.5 ? 'Elevated' : 'Low'}
-				sparkSeries={smokeSeriesPct.slice(-24)}
-				formatValue={(n) => n.toFixed(1)}
-			>
-				{#snippet icon()}
-					<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/></svg>
-				{/snippet}
-			</TelemetryCard>
-
-			<TelemetryCard
-				label="PM 2.5"
-				value={avgPM25.toFixed(0)}
-				unit="µg/m³"
-				variant={avgPM25 > 150 ? 'critical' : avgPM25 > 75 ? 'warning' : 'online'}
-				trend={avgPM25 > 100 ? 'up' : 'stable'}
-				trendLabel={avgPM25 > 150 ? 'Hazardous' : avgPM25 > 75 ? 'Moderate' : 'Good'}
-			>
-				{#snippet icon()}
-					<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
-				{/snippet}
-			</TelemetryCard>
+	<div class="dash__focus-card">
+		<div>
+			<h2>Current watch focus</h2>
+			<p>Track smoke, heat, humidity, and wind conditions across the active monitoring region. Prioritize critical alerts and heat anomalies before they escalate into a wildfire incident.</p>
 		</div>
-
-		<!-- Weather widget -->
-		<Card padding="md" class="dash__weather">
-			<WeatherWidget />
-		</Card>
-	</div>
-
-	<!-- ── Row 3 — overview charts + recent alerts ────────────────────────── -->
-	<div class="dash__row dash__row--charts">
-		<div class="dash__charts-col">
-			<!-- Temperature + smoke chart -->
-			<OverviewChartWidget
-				title="Surface Temperature & Smoke Trend"
-				subtitle="48-hour rolling average · Click series in legend to toggle"
-				unit=""
-				series={tempChartSeries}
-				badge={{ label: 'Live', variant: 'online' }}
-				formatValue={(n) => n.toFixed(1)}
-			/>
-
-			<!-- Risk index chart -->
-			<OverviewChartWidget
-				title="Risk Index — 30-Day History"
-				subtitle="Composite EmberBrain risk score for highest-risk region"
-				series={riskChartSeries}
-				badge={{ label: 'High Risk', variant: 'critical' }}
-				formatValue={(n) => n.toFixed(0)}
-			/>
+		<div class="dash__focus-metrics">
+			<div><strong>{avgTemp.toFixed(1)}°C</strong><span>Avg. temp</span></div>
+			<div><strong>{avgHumidity.toFixed(0)}%</strong><span>Humidity</span></div>
+			<div><strong>{(avgSmoke * 100).toFixed(0)}%</strong><span>Smoke index</span></div>
 		</div>
-
-		<!-- Recent alerts column -->
-		<Card padding="md" class="dash__alerts-col">
-			<RecentAlertsWidget />
-		</Card>
 	</div>
 </div>
 
@@ -257,6 +132,57 @@
 		align-items: center;
 		gap: 8px;
 		flex-shrink: 0;
+	}
+
+	.dash__focus-card {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 20px;
+		padding: 18px 20px;
+		border: 1px solid var(--surface-border);
+		border-radius: 16px;
+		background: linear-gradient(135deg, rgba(240, 120, 64, 0.10), rgba(15, 23, 42, 0.70));
+	}
+
+	.dash__focus-card h2 {
+		margin: 0 0 6px;
+		font-size: 16px;
+		color: var(--text-primary);
+	}
+
+	.dash__focus-card p {
+		margin: 0;
+		color: var(--text-muted);
+		max-width: 700px;
+	}
+
+	.dash__focus-metrics {
+		display: flex;
+		gap: 12px;
+		flex-wrap: wrap;
+	}
+
+	.dash__focus-metrics div {
+		display: flex;
+		flex-direction: column;
+		padding: 10px 12px;
+		border-radius: 12px;
+		background: rgba(255, 255, 255, 0.04);
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		min-width: 100px;
+	}
+
+	.dash__focus-metrics strong {
+		font-size: 16px;
+		color: var(--text-primary);
+	}
+
+	.dash__focus-metrics span {
+		font-size: 11px;
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
 	}
 	.dash__live-dot {
 		display: inline-block;
