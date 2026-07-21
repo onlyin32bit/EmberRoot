@@ -6,6 +6,7 @@
 	import 'leaflet.markercluster';
 	import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 	import 'leaflet.markercluster/dist/MarkerCluster.css';
+	import { PUBLIC_FIRMS_MAP_KEY } from '$env/static/public';
 
 	let {
 	sensors = [],
@@ -25,6 +26,7 @@
 	let clusterGroup: L.MarkerClusterGroup;
 	let heatmapLayer: L.LayerGroup | null = null;
 	let hotspotLayer: L.LayerGroup | null = null;
+	let firmsLastUpdated: Date | null = $state(null);
 	let previousSelectedId: string | null = null;
 
 	const defaultCenter: L.LatLngExpression = [9.66, 105.04];
@@ -167,13 +169,73 @@
 		return layer;
 	}
 
-	function addFirmsHotspots() {
+	// Bounding box for U Minh Region (approx W,S,E,N)
+	const UMINH_BBOX = '104.0,9.0,106.0,10.0';
+
+	async function fetchFirmsHotspots() {
+		const cacheKey = 'firms_hotspots_cache';
+		const cacheTimeKey = 'firms_hotspots_cache_time';
+		const now = Date.now();
+		
+		// 15-minute cache TTL
+		if (localStorage.getItem(cacheKey) && localStorage.getItem(cacheTimeKey)) {
+			const cachedTime = parseInt(localStorage.getItem(cacheTimeKey) || '0', 10);
+			if (now - cachedTime < 15 * 60 * 1000) {
+				firmsLastUpdated = new Date(cachedTime);
+				return JSON.parse(localStorage.getItem(cacheKey) || '[]');
+			}
+		}
+
+		try {
+			// NASA FIRMS Area API Endpoint for CSV
+			const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${PUBLIC_FIRMS_MAP_KEY}/VIIRS_SNPP_NRT/${UMINH_BBOX}/1`;
+			const res = await fetch(url);
+			
+			if (!res.ok) throw new Error('FIRMS API Error');
+			const text = await res.text();
+			
+			// Simple CSV parser
+			const rows = text.split('\n').slice(1).filter(r => r.trim().length > 0);
+			const hotspots = rows.map(row => {
+				const cols = row.split(',');
+				return {
+					lat: parseFloat(cols[0]),
+					lon: parseFloat(cols[1]),
+					bright_ti4: parseFloat(cols[2]),
+					scan: parseFloat(cols[3]),
+					track: parseFloat(cols[4]),
+					acq_date: cols[5],
+					acq_time: cols[6],
+					confidence: cols[8]
+				};
+			});
+			
+			localStorage.setItem(cacheKey, JSON.stringify(hotspots));
+			localStorage.setItem(cacheTimeKey, now.toString());
+			firmsLastUpdated = new Date(now);
+			return hotspots;
+		} catch (err) {
+			console.error('Failed to fetch FIRMS data:', err);
+			// Fallback to cache if available
+			if (localStorage.getItem(cacheKey)) {
+				firmsLastUpdated = new Date(parseInt(localStorage.getItem(cacheTimeKey) || '0', 10));
+				return JSON.parse(localStorage.getItem(cacheKey) || '[]');
+			}
+			return [];
+		}
+	}
+
+	async function addFirmsHotspots() {
 		const layer = L.layerGroup();
-		const hotspots = mockService.getHotspotsForRegion('RG-UMINH-01');
+		const hotspots = await fetchFirmsHotspots();
+		
 		for (const hotspot of hotspots) {
+			const confidenceVal = hotspot.confidence === 'h' ? 100 : hotspot.confidence === 'n' ? 50 : 25;
+			const radius = 8 + Math.round((hotspot.bright_ti4 - 290) / 10);
+			
 			layer.addLayer(
-				L.circleMarker([hotspot.location.lat, hotspot.location.lon], {
-					radius: 8 + Math.round(hotspot.intensity / 12),
+				L.circleMarker([hotspot.lat, hotspot.lon], {
+					radius: Math.max(5, Math.min(20, radius)),
 					color: '#facc15',
 					fillColor: '#fde68a',
 					fillOpacity: 0.8,
@@ -182,9 +244,10 @@
 					<div style="font-family:'JetBrains Mono',monospace; padding:6px 4px; min-width:200px; color:#e2e8f0;">
 						<div style="font-weight:700; color:#f59e0b; margin-bottom:6px;">FIRMS Thermal Hotspot</div>
 						<div style="display:grid; gap:4px; font-size:11px;">
-							<div><span style="color:#94a3b8;">Intensity</span> <strong>${Math.round(hotspot.intensity)}%</strong></div>
-							<div><span style="color:#94a3b8;">Confidence</span> <strong>${Math.round(hotspot.confidence)}%</strong></div>
-							<div><span style="color:#94a3b8;">Detected</span> <strong>${new Date(hotspot.detectedAt).toLocaleString()}</strong></div>
+							<div><span style="color:#94a3b8;">Brightness</span> <strong>${hotspot.bright_ti4} K</strong></div>
+							<div><span style="color:#94a3b8;">Confidence</span> <strong>${confidenceVal}%</strong></div>
+							<div><span style="color:#94a3b8;">Detected</span> <strong>${hotspot.acq_date} ${hotspot.acq_time} UTC</strong></div>
+							<div><span style="color:#94a3b8;">Status</span> <strong style="color:var(--status-online);">Live API Data</strong></div>
 						</div>
 					</div>
 				`)
@@ -210,11 +273,11 @@
 		}
 	}
 
-	function setHotspotLayer(enabled: boolean) {
+	async function setHotspotLayer(enabled: boolean) {
 		if (!map) return;
 		if (enabled) {
 			if (!hotspotLayer) {
-				hotspotLayer = addFirmsHotspots();
+				hotspotLayer = await addFirmsHotspots();
 			}
 			if (hotspotLayer && !map.hasLayer(hotspotLayer)) {
 				map.addLayer(hotspotLayer);
@@ -314,7 +377,19 @@
 	}
 </script>
 
-<div id="emberroot-map" class="map-view"></div>
+<div style="position: relative; width: 100%; height: 100%;">
+	<div id="emberroot-map" class="map-view"></div>
+	{#if activeLayers.firmsHotspots}
+		<div class="firms-metadata">
+			<span>FIRMS Layer Status:</span>
+			{#if firmsLastUpdated}
+				<span style="color: var(--status-online);">Updated {firmsLastUpdated.toLocaleTimeString()}</span>
+			{:else}
+				<span style="color: var(--status-warning);">Syncing...</span>
+			{/if}
+		</div>
+	{/if}
+</div>
 
 <style>
 	.map-view {
@@ -346,5 +421,24 @@
 	/* Hide the default Leaflet tooltip arrow for permanent labels */
 	:global(.er-node-label::before) {
 		display: none;
+	}
+
+	.firms-metadata {
+		position: absolute;
+		bottom: 12px;
+		right: 12px;
+		background: rgba(15, 23, 42, 0.85);
+		border: 1px solid rgba(255, 255, 255, 0.14);
+		border-radius: 6px;
+		padding: 6px 10px;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 11px;
+		color: #e2e8f0;
+		z-index: 1000;
+		display: flex;
+		gap: 6px;
+		backdrop-filter: blur(4px);
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+		pointer-events: none;
 	}
 </style>

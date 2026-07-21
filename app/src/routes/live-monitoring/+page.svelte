@@ -4,531 +4,414 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
-	import StatusIndicator from '$lib/components/ui/StatusIndicator.svelte';
+	import { LineAreaChart } from '$lib/components/charts';
 	import { mockService } from '$lib/mock';
 
-	const sensors = mockService.getSensors().filter((sensor) => sensor.regionId === 'RG-UMINH-01').slice(0, 12);
-	const replayLength = 96;
-
-	let replayIndex = $state(0);
-	let isPlaying = $state(true);
-	let playbackSpeed = $state(1);
-	let hoveredStep = $state<number | null>(null);
-	let timer: ReturnType<typeof setInterval> | null = null;
-
-	function statusTone(status: 'online' | 'warning' | 'offline') {
-		const tones = {
-			online: { label: 'Stable', color: 'var(--status-online)' },
-			warning: { label: 'Watch', color: 'var(--status-warning)' },
-			offline: { label: 'Offline', color: 'var(--status-offline)' }
-		} as const;
-		return tones[status];
+	// View State
+	let viewMode = $state<'node' | 'region'>('node');
+	
+	// Data
+	const sensors = mockService.getSensors();
+	const regions = mockService.getRegions();
+	
+	// Selection State
+	let selectedRegionId = $state(regions[0].id);
+	let selectedNodeId = $state(sensors.find(s => s.regionId === selectedRegionId)?.id ?? sensors[0].id);
+	let selectedDateRange = $state('7d');
+	
+	// Derived state for the view
+	const currentRegion = $derived(mockService.getRegion(selectedRegionId));
+	const currentNode = $derived(mockService.getSensor(selectedNodeId));
+	const regionSensors = $derived(mockService.getSensorsForRegion(selectedRegionId));
+	const telemetry = $derived(currentNode ? mockService.getTelemetry(currentNode.id) : null);
+	
+	// Helper to filter data by date range
+	function filterByDateRange<T extends { timestamp: number }>(data: T[], range: string): T[] {
+		if (!data || data.length === 0) return [];
+		const now = Date.now();
+		let cutoff = now;
+		
+		if (range === '24h') cutoff = now - 24 * 60 * 60 * 1000;
+		else if (range === '7d') cutoff = now - 7 * 24 * 60 * 60 * 1000;
+		else if (range === '30d') cutoff = now - 30 * 24 * 60 * 60 * 1000;
+		else return data; // all
+		
+		return data.filter(d => d.timestamp >= cutoff);
 	}
 
-	function getReplayPoint(index: number) {
-		return sensors.map((sensor) => {
-			const telemetry = mockService.getTelemetry(sensor.id);
-			const history = telemetry?.history;
-			const historyLength = history?.temperature?.length ?? 0;
-			const safeIndex = historyLength > 0 ? Math.min(historyLength - 1, Math.round((index / (replayLength - 1)) * (historyLength - 1))) : 0;
-			const temp = history?.temperature?.[safeIndex]?.value ?? telemetry?.temperature ?? 0;
-			const co2 = history?.co2Ppm?.[safeIndex]?.value ?? telemetry?.co2Ppm ?? 0;
-			const moisture = history?.soilMoisture?.[safeIndex]?.value ?? telemetry?.soilMoisture ?? 0;
-			const battery = history?.batteryPct?.[safeIndex]?.value ?? telemetry?.batteryPct ?? 0;
-			const signal = history?.signalStrength?.[safeIndex]?.value ?? telemetry?.signalStrength ?? 0;
-			const status: 'online' | 'warning' | 'offline' = battery < 10 || signal < -100 ? 'offline' : temp > 34 || co2 > 1450 || moisture < 18 ? 'warning' : 'online';
+	// Individual Sensor Data
+	const tempSeries = $derived(filterByDateRange(telemetry?.history.temperature ?? [], selectedDateRange));
+	const moistureSeries = $derived(filterByDateRange(telemetry?.history.soilMoisture ?? [], selectedDateRange));
+	const groundwaterSeries = $derived(filterByDateRange(telemetry?.history.groundwaterLevel ?? [], selectedDateRange));
+	const gasSeries = $derived(filterByDateRange(telemetry?.history.co2Ppm ?? [], selectedDateRange));
+	
+	// Derive historical risk score for a single node (mocked based on temp and moisture)
+	const nodeRiskSeries = $derived(tempSeries.map((t, i) => {
+		const m = moistureSeries[i]?.value ?? 50;
+		// Simple mock calculation: higher temp + lower moisture = higher risk
+		let risk = Math.max(0, Math.min(100, (t.value * 2) + ((100 - m) * 0.5) - 20));
+		return { timestamp: t.timestamp, value: Math.round(risk) };
+	}));
 
-			return {
-				sensor,
-				temp,
-				co2,
-				moisture,
-				battery,
-				signal,
-				status,
-				tone: statusTone(status)
-			};
-		});
-	}
-
-	const replaySnapshots = $derived(getReplayPoint(replayIndex));
-	const activeRiskScore = $derived.by(() => {
-		const risk = Math.round(replaySnapshots.reduce((sum, item) => sum + (item.status === 'offline' ? 92 : item.status === 'warning' ? 64 : 18), 0) / Math.max(replaySnapshots.length, 1));
-		return Math.max(8, Math.min(100, risk));
-	});
-
-	const summary = $derived.by(() => {
-		const counts = replaySnapshots.reduce(
-			(acc, item) => {
-				if (item.status === 'offline') acc.offline += 1;
-				else if (item.status === 'warning') acc.warning += 1;
-				else acc.online += 1;
-				return acc;
-			},
-			{ online: 0, warning: 0, offline: 0 }
-		);
-		return counts;
-	});
-
-	const timeline = $derived.by(() => {
-		return Array.from({ length: replayLength }, (_, pointIndex) => {
-			const sample = getReplayPoint(pointIndex);
-			const risk = Math.round(sample.reduce((sum, item) => sum + (item.status === 'offline' ? 70 : item.status === 'warning' ? 45 : 12), 0) / sample.length);
-			return Math.max(8, Math.min(100, risk));
-		});
-	});
-
-	const currentTimestamp = $derived.by(() => {
-		const telemetry = mockService.getTelemetry(sensors[0]?.id ?? '');
-		const history = telemetry?.history.temperature;
-		if (!history?.length) return new Date().toLocaleString();
-		const point = history[Math.min(history.length - 1, Math.round((replayIndex / (replayLength - 1)) * (history.length - 1)))];
-		return new Date(point.timestamp).toLocaleString(undefined, {
-			year: 'numeric',
-			month: 'short',
-			day: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit'
-		});
-	});
-
-	function togglePlayback() {
-		isPlaying = !isPlaying;
-		if (isPlaying) startPlayback();
-		else stopPlayback();
-	}
-
-	function startPlayback() {
-		if (timer) clearInterval(timer);
-		timer = setInterval(() => {
-			replayIndex = (replayIndex + 1) % replayLength;
-		}, 1100 / playbackSpeed);
-	}
-
-	function stopPlayback() {
-		if (timer) {
-			clearInterval(timer);
-			timer = null;
+	// Regional Data (Average across nodes)
+	const regionalRiskSeries = $derived.by(() => {
+		// Mock historical regional risk data based on the region's current composite risk
+		const baseRisk = mockService.getRiskIndex(selectedRegionId)?.composite ?? 50;
+		const now = Date.now();
+		const days = selectedDateRange === '24h' ? 1 : selectedDateRange === '7d' ? 7 : selectedDateRange === '30d' ? 30 : 90;
+		const points = days * 24; // 1 point per hour
+		
+		const data = [];
+		for(let i = 0; i < points; i++) {
+			const time = now - (points - i) * 60 * 60 * 1000;
+			// Add some noise
+			const noise = Math.sin(i * 0.1) * 5 + Math.cos(i * 0.05) * 3;
+			data.push({ timestamp: time, value: Math.max(0, Math.min(100, baseRisk + noise)) });
 		}
-	}
-
-	function jumpTo(index: number) {
-		replayIndex = index;
-	}
-
-	function resetReplay() {
-		replayIndex = 0;
-	}
-
-	onMount(() => {
-		if (isPlaying) startPlayback();
+		return data;
 	});
 
-	onDestroy(() => {
-		stopPlayback();
+	// Region Comparison Data
+	const regionComparisonSeries = $derived(regions.map((r, index) => {
+		const baseRisk = mockService.getRiskIndex(r.id)?.composite ?? 50;
+		const now = Date.now();
+		const data = [];
+		for(let i = 0; i < 24; i++) {
+			const time = now - (24 - i) * 60 * 60 * 1000;
+			data.push({ timestamp: time, value: Math.max(0, Math.min(100, baseRisk + Math.sin(i * 0.2 + index) * 5)) });
+		}
+		return {
+			id: r.id,
+			label: r.name,
+			data: data,
+			color: `hsl(${10 + index * 40}, 80%, 50%)`,
+			filled: false
+		};
+	}));
+
+	// CSV Export functionality
+	function downloadBlob(filename: string, content: string) {
+		const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		URL.revokeObjectURL(url);
+	}
+
+	function exportCSV() {
+		let csvContent = "";
+		let filename = "";
+
+		if (viewMode === 'node') {
+			filename = `node_history_${selectedNodeId}_${selectedDateRange}.csv`;
+			const headers = ['Timestamp', 'Risk Score', 'Temperature (C)', 'Soil Moisture (%)', 'Groundwater (m)', 'CO2 (ppm)'];
+			csvContent += headers.join(',') + '\n';
+			
+			for(let i = 0; i < tempSeries.length; i++) {
+				const time = new Date(tempSeries[i].timestamp).toISOString();
+				const risk = nodeRiskSeries[i]?.value ?? 0;
+				const temp = tempSeries[i]?.value ?? 0;
+				const moist = moistureSeries[i]?.value ?? 0;
+				const gw = groundwaterSeries[i]?.value ?? 0;
+				const gas = gasSeries[i]?.value ?? 0;
+				
+				csvContent += `${time},${risk},${temp},${moist},${gw},${gas}\n`;
+			}
+		} else {
+			filename = `region_history_${selectedRegionId}_${selectedDateRange}.csv`;
+			const headers = ['Timestamp', 'Avg Risk Score'];
+			csvContent += headers.join(',') + '\n';
+			
+			for(let i = 0; i < regionalRiskSeries.length; i++) {
+				const time = new Date(regionalRiskSeries[i].timestamp).toISOString();
+				const risk = regionalRiskSeries[i].value;
+				csvContent += `${time},${risk.toFixed(2)}\n`;
+			}
+		}
+
+		downloadBlob(filename, csvContent);
+	}
+	
+	// Sync node selection when region changes
+	$effect(() => {
+		if (selectedRegionId) {
+			const validSensors = mockService.getSensorsForRegion(selectedRegionId);
+			if (validSensors.length > 0 && !validSensors.find(s => s.id === selectedNodeId)) {
+				selectedNodeId = validSensors[0].id;
+			}
+		}
 	});
+
 </script>
 
 <svelte:head>
-	<title>Live Monitoring — EmberRoot</title>
-	<meta name="description" content="Historical replay and live-style telemetry animation for EmberRoot sensor nodes." />
+	<title>Historical Analytics — EmberRoot</title>
 </svelte:head>
 
 <PageShell
-	title="Live Monitoring"
-	subtitle="Historical replay with animated node status across the last 7-day telemetry window"
-	breadcrumb={['EmberRoot', 'Operations', 'Live Monitoring']}
+	title="Historical Query & Analytics"
+	subtitle="Interactive historical analysis of risk scores and telemetry across regions and individual nodes"
+	breadcrumb={['EmberRoot', 'Operations', 'Historical Analytics']}
 >
-	<div class="replay-shell">
-		<Card padding="md" class="hero-card">
-			<div class="hero-card__content">
-				<div>
-					<div class="hero-card__eyebrow">Mission replay</div>
-					<h2 class="hero-card__title">Watch U Minh nodes transition through the latest fire-risk window.</h2>
-					<p class="hero-card__text">
-						The timeline below animates telemetry snapshots from the mock data model so the operations team can scrub through historical status changes without leaving the dashboard.
-					</p>
+	<div class="analytics-layout">
+		<!-- Toolbar -->
+		<Card padding="md" class="toolbar-card">
+			<div class="toolbar-content">
+				<div class="view-toggle">
+					<button 
+						class="toggle-btn" 
+						class:active={viewMode === 'node'} 
+						onclick={() => viewMode = 'node'}
+					>
+						Node View
+					</button>
+					<button 
+						class="toggle-btn" 
+						class:active={viewMode === 'region'} 
+						onclick={() => viewMode = 'region'}
+					>
+						Region View
+					</button>
 				</div>
-				<div class="hero-card__pill-row">
-					<Badge variant="ember" size="sm">7-day replay</Badge>
-					<Badge variant="neutral" size="sm">{sensors.length} nodes</Badge>
-				</div>
-			</div>
-		</Card>
-
-		<div class="replay-controls">
-			<Card padding="md" class="control-card">
-				<div class="control-card__header">
-					<div>
-						<div class="control-card__eyebrow">Playback</div>
-						<div class="control-card__title">{currentTimestamp}</div>
-					</div>
-					<StatusIndicator status="online" pulse={true} label={isPlaying ? 'Playing' : 'Paused'} />
-				</div>
-				<div class="control-card__actions">
-					<Button variant="primary" size="sm" onclick={togglePlayback}>
-						{isPlaying ? 'Pause' : 'Play'}
+				
+				<div class="filters">
+					<select class="er-select" bind:value={selectedRegionId}>
+						{#each regions as region}
+							<option value={region.id}>{region.name}</option>
+						{/each}
+					</select>
+					
+					{#if viewMode === 'node'}
+						<select class="er-select" bind:value={selectedNodeId}>
+							{#each regionSensors as sensor}
+								<option value={sensor.id}>{sensor.id} - {sensor.name}</option>
+							{/each}
+						</select>
+					{/if}
+					
+					<select class="er-select" bind:value={selectedDateRange}>
+						<option value="24h">Last 24 Hours</option>
+						<option value="7d">Last 7 Days</option>
+						<option value="30d">Last 30 Days</option>
+						<option value="all">All Time</option>
+					</select>
+					
+					<Button variant="primary" size="sm" onclick={exportCSV}>
+						<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right: 6px;">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+						</svg>
+						Export CSV
 					</Button>
-					<Button variant="secondary" size="sm" onclick={resetReplay}>Reset</Button>
-					<Button variant="ghost" size="sm" onclick={() => (playbackSpeed = playbackSpeed === 1 ? 2 : 1)}>Speed ×{playbackSpeed}</Button>
 				</div>
-				<input class="replay-slider" type="range" min="0" max={replayLength - 1} bind:value={replayIndex} />
-			</Card>
-
-			<div class="summary-grid">
-				<Card padding="sm" class="summary-card">
-					<div class="summary-card__label">Online</div>
-					<div class="summary-card__value">{summary.online}</div>
-				</Card>
-				<Card padding="sm" class="summary-card">
-					<div class="summary-card__label">Watch</div>
-					<div class="summary-card__value">{summary.warning}</div>
-				</Card>
-				<Card padding="sm" class="summary-card">
-					<div class="summary-card__label">Offline</div>
-					<div class="summary-card__value">{summary.offline}</div>
-				</Card>
 			</div>
+		</Card>
+
+		<div class="charts-grid">
+			{#if viewMode === 'node'}
+				<!-- Node Level Analytics -->
+				<Card padding="lg" class="main-chart">
+					<div class="chart-header">
+						<h3>Historical Risk Score — {currentNode?.name || selectedNodeId}</h3>
+						<Badge variant="warning">Node Level</Badge>
+					</div>
+					<div class="chart-container">
+						<LineAreaChart 
+							series={[{ id: 'risk', label: 'Risk Score', data: nodeRiskSeries, color: 'var(--ember-400)' }]} 
+							unit="" 
+							height={300} 
+						/>
+					</div>
+				</Card>
+				
+				<Card padding="lg" class="sub-chart">
+					<div class="chart-header">
+						<h3>Temperature & Humidity</h3>
+					</div>
+					<div class="chart-container">
+						<LineAreaChart 
+							series={[
+								{ id: 'temp', label: 'Temp (°C)', data: tempSeries, color: '#f59e0b' },
+								{ id: 'moisture', label: 'Moisture (%)', data: moistureSeries, color: '#3b82f6', filled: false }
+							]} 
+							unit="" 
+							height={220} 
+						/>
+					</div>
+				</Card>
+				
+				<Card padding="lg" class="sub-chart">
+					<div class="chart-header">
+						<h3>Gas & Hydrology</h3>
+					</div>
+					<div class="chart-container">
+						<LineAreaChart 
+							series={[
+								{ id: 'gas', label: 'CO2 (ppm)', data: gasSeries, color: '#8b5cf6' },
+								{ id: 'gw', label: 'Groundwater (m)', data: groundwaterSeries, color: '#06b6d4', filled: false }
+							]} 
+							unit="" 
+							height={220} 
+						/>
+					</div>
+				</Card>
+			{:else}
+				<!-- Region Level Analytics -->
+				<Card padding="lg" class="main-chart">
+					<div class="chart-header">
+						<h3>Average Regional Risk Score — {currentRegion?.name}</h3>
+						<Badge variant="ember">Region Level</Badge>
+					</div>
+					<p class="chart-desc">Computed average risk across {regionSensors.length} active nodes in the management zone.</p>
+					<div class="chart-container">
+						<LineAreaChart 
+							series={[{ id: 'regRisk', label: 'Avg Risk Score', data: regionalRiskSeries, color: 'var(--status-critical)' }]} 
+							unit="" 
+							height={300} 
+						/>
+					</div>
+				</Card>
+				
+				<Card padding="lg" class="full-width-chart">
+					<div class="chart-header">
+						<h3>Regional Risk Comparison</h3>
+						<Badge variant="neutral">Global</Badge>
+					</div>
+					<p class="chart-desc">Comparing average risk scores across all operating regions over the last 24 hours.</p>
+					<div class="chart-container">
+						<LineAreaChart 
+							series={regionComparisonSeries} 
+							unit="" 
+							height={300} 
+						/>
+					</div>
+				</Card>
+			{/if}
 		</div>
-
-		<Card padding="md" class="timeline-card">
-			<div class="timeline-card__header">
-				<div>
-					<div class="timeline-card__eyebrow">Risk pulse</div>
-					<div class="timeline-card__title">Animated risk score over time</div>
-				</div>
-				<div class="timeline-card__meta">
-					<div class="timeline-card__preview">
-						<span class="timeline-card__preview-label">{hoveredStep !== null ? 'Preview' : 'Current'}</span>
-						<span class="timeline-card__preview-value">
-							{hoveredStep !== null ? timeline[hoveredStep] : activeRiskScore}% risk
-						</span>
-					</div>
-					<Badge variant="warning" size="sm">{replayIndex + 1}/{replayLength} steps</Badge>
-				</div>
-			</div>
-			<div class="timeline-strip" role="list" aria-label="Replay timeline">
-				{#each timeline as point, index}
-					<button
-						type="button"
-						class="timeline-strip__cell"
-						class:timeline-strip__cell--active={index === replayIndex}
-						onclick={() => jumpTo(index)}
-						onmouseenter={() => (hoveredStep = index)}
-						onmouseleave={() => (hoveredStep = null)}
-						style={`--cell-height:${Math.max(8, point)}%`}
-						title={`${point}% risk for this replay step`}
-						aria-label={`Jump to replay step ${index + 1} with ${point}% risk`}
-					></button>
-				{/each}
-			</div>
-		</Card>
-
-		<Card padding="md" class="node-list-card">
-			<div class="node-list-card__header">
-				<div>
-					<div class="node-list-card__eyebrow">Node state snapshot</div>
-					<div class="node-list-card__title">Status view at the selected replay step</div>
-				</div>
-			</div>
-			<div class="node-list">
-				{#each replaySnapshots as item}
-					<div class="node-item">
-						<div class="node-item__meta">
-							<div class="node-item__name">{item.sensor.name}</div>
-							<div class="node-item__id">{item.sensor.id}</div>
-						</div>
-						<div class="node-item__status" style={`color:${item.tone.color}; border-color:${item.tone.color}44; background:${item.tone.color}1a`}>
-							{item.tone.label}
-						</div>
-						<div class="node-item__metrics">
-							<span>Temp {item.temp.toFixed(1)}°C</span>
-							<span>CO₂ {Math.round(item.co2)} ppm</span>
-							<span>Moisture {item.moisture.toFixed(1)}%</span>
-						</div>
-					</div>
-				{/each}
-			</div>
-		</Card>
 	</div>
 </PageShell>
 
 <style>
-	.replay-shell {
+	.analytics-layout {
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
 	}
 
-	.hero-card {
-		background: linear-gradient(135deg, rgba(240, 120, 64, 0.14), rgba(10, 20, 30, 0.94));
+	.toolbar-card {
+		background: rgba(15, 23, 42, 0.6);
+		border-color: rgba(255, 255, 255, 0.08);
 	}
 
-	.hero-card__content {
+	.toolbar-content {
 		display: flex;
 		justify-content: space-between;
-		gap: 16px;
-		align-items: flex-start;
-	}
-
-	.hero-card__eyebrow,
-	.control-card__eyebrow,
-	.timeline-card__eyebrow,
-	.node-list-card__eyebrow {
-		font-size: 10px;
-		font-weight: 700;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: var(--text-muted);
-		margin-bottom: 6px;
-	}
-
-	.hero-card__title,
-	.control-card__title,
-	.timeline-card__title,
-	.node-list-card__title {
-		margin: 0;
-		font-size: 18px;
-		font-weight: 700;
-		color: var(--text-primary);
-	}
-
-	.hero-card__text {
-		margin: 8px 0 0;
-		max-width: 720px;
-		color: var(--text-secondary);
-		line-height: 1.6;
-	}
-
-	.hero-card__pill-row {
-		display: flex;
-		gap: 8px;
+		align-items: center;
 		flex-wrap: wrap;
-	}
-
-	.replay-controls {
-		display: grid;
-		grid-template-columns: 1.7fr 0.9fr;
 		gap: 16px;
 	}
 
-	.control-card {
+	.view-toggle {
 		display: flex;
-		flex-direction: column;
-		gap: 14px;
+		background: rgba(0, 0, 0, 0.3);
+		border-radius: 8px;
+		padding: 4px;
+		border: 1px solid rgba(255, 255, 255, 0.1);
 	}
 
-	.control-card__header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: 12px;
-	}
-
-	.control-card__actions {
-		display: flex;
-		gap: 8px;
-		flex-wrap: wrap;
-	}
-
-	.replay-slider {
-		width: 100%;
-		accent-color: var(--ember-400);
-	}
-
-	.summary-grid {
-		display: grid;
-		gap: 12px;
-	}
-
-	.summary-card {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-
-	.summary-card__label {
-		font-size: 11px;
-		font-weight: 700;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
+	.toggle-btn {
+		background: transparent;
+		border: none;
 		color: var(--text-muted);
-	}
-
-	.summary-card__value {
-		font-size: 22px;
-		font-weight: 800;
-		font-family: 'JetBrains Mono', monospace;
-		color: var(--text-primary);
-	}
-
-	.timeline-card,
-	.node-list-card {
-		display: flex;
-		flex-direction: column;
-		gap: 14px;
-	}
-
-	.timeline-card__header,
-	.node-list-card__header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: 12px;
-	}
-
-	.timeline-card__meta {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-	}
-
-	.timeline-card__preview {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 7px 10px;
-		border-radius: 999px;
-		background: rgba(240, 120, 64, 0.12);
-		border: 1px solid rgba(240, 120, 64, 0.22);
-	}
-
-	.timeline-card__preview-label {
-		font-size: 10px;
-		font-weight: 700;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: var(--text-muted);
-	}
-
-	.timeline-card__preview-value {
-		font-size: 12px;
-		font-weight: 700;
-		color: var(--ember-300);
-	}
-
-	.timeline-strip {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(6px, 1fr));
-		gap: 4px;
-		align-items: end;
-		min-height: 140px;
-		padding: 6px 2px 2px;
-	}
-
-	.timeline-strip:hover .timeline-strip__cell:not(:hover):not(.timeline-strip__cell--active) {
-		opacity: 0.4;
-		transform: scaleY(0.95);
-	}
-
-	.timeline-strip__cell {
-		position: relative;
-		border: 0;
-		border-radius: 999px 999px 4px 4px;
-		background: linear-gradient(180deg, rgba(240, 120, 64, 0.4), rgba(240, 120, 64, 0.1));
-		min-height: 8px;
-		height: var(--cell-height);
+		padding: 6px 16px;
+		font-size: 13px;
+		font-weight: 600;
+		border-radius: 6px;
 		cursor: pointer;
-		transform-origin: bottom center;
-		opacity: 0.7;
-		transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-		box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
+		transition: all 0.2s ease;
 	}
 
-	.timeline-strip__cell::before {
-		content: '';
-		position: absolute;
-		inset: 0;
-		border-radius: inherit;
-		background: linear-gradient(180deg, rgba(240, 120, 64, 1), rgba(240, 120, 64, 0.3));
-		opacity: 0;
-		transition: opacity 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-	}
-
-	.timeline-strip__cell:hover,
-	.timeline-strip__cell:focus-visible {
-		opacity: 1;
-		transform: scaleY(1.1) translateY(-2px);
-		box-shadow: 0 8px 16px -6px rgba(240, 120, 64, 0.6);
-		z-index: 2;
-	}
-
-	.timeline-strip__cell:hover::before,
-	.timeline-strip__cell:focus-visible::before {
-		opacity: 1;
-	}
-
-	.timeline-strip__cell--active {
-		opacity: 1;
-		background: linear-gradient(180deg, var(--ember-300), var(--ember-500));
-		transform: scaleY(1.05);
-		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2), 0 8px 24px -8px rgba(240, 120, 64, 0.8);
-		z-index: 1;
-	}
-
-	.timeline-strip__cell--active::before {
-		opacity: 1;
-		background: linear-gradient(180deg, #fff, transparent);
-		mix-blend-mode: overlay;
-	}
-
-	.node-list {
-		display: grid;
-		gap: 10px;
-	}
-
-	.node-item {
-		display: grid;
-		grid-template-columns: 1.35fr auto 1fr;
-		gap: 12px;
-		align-items: center;
-		padding: 12px 14px;
-		border: 1px solid var(--surface-border);
-		border-radius: 14px;
+	.toggle-btn.active {
 		background: var(--surface-raised);
+		color: var(--text-primary);
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 	}
 
-	.node-item__name {
-		font-weight: 700;
+	.filters {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		flex-wrap: wrap;
+	}
+
+	.er-select {
+		background: var(--surface-base);
+		color: var(--text-primary);
+		border: 1px solid var(--surface-border);
+		border-radius: 6px;
+		padding: 6px 12px;
+		font-size: 13px;
+		font-family: inherit;
+		outline: none;
+		cursor: pointer;
+		min-width: 140px;
+	}
+	
+	.er-select:focus {
+		border-color: var(--ember-400);
+	}
+
+	.charts-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 16px;
+	}
+
+	.main-chart {
+		grid-column: 1 / -1;
+	}
+	
+	.full-width-chart {
+		grid-column: 1 / -1;
+	}
+
+	.sub-chart {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.chart-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 8px;
+	}
+
+	.chart-header h3 {
+		margin: 0;
+		font-size: 16px;
+		font-weight: 600;
 		color: var(--text-primary);
 	}
 
-	.node-item__id {
-		font-size: 11px;
+	.chart-desc {
+		font-size: 13px;
 		color: var(--text-muted);
+		margin: 0 0 16px 0;
 	}
 
-	.node-item__status {
-		justify-self: start;
-		padding: 4px 10px;
-		border: 1px solid;
-		border-radius: 999px;
-		font-size: 10px;
-		font-weight: 700;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-	}
-
-	.node-item__metrics {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 10px;
-		justify-content: flex-end;
-		font-size: 12px;
-		color: var(--text-secondary);
+	.chart-container {
+		flex: 1;
+		width: 100%;
+		position: relative;
 	}
 
 	@media (max-width: 900px) {
-		.replay-controls {
+		.charts-grid {
 			grid-template-columns: 1fr;
-		}
-
-		.node-item {
-			grid-template-columns: 1fr;
-		}
-
-		.node-item__metrics {
-			justify-content: flex-start;
 		}
 	}
 </style>

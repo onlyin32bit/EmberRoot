@@ -41,7 +41,7 @@
 			read: false,
 			kind: 'alert' as const,
 			createdAt: new Date(alert.triggeredAt).toLocaleString([], { hour: 'numeric', minute: '2-digit' }),
-			href: '/reports'
+			href: `/alerts/${alert.id}`
 		})),
 		...mockService.getActiveIncidents().slice(0, 2).map((incident) => ({
 			id: incident.id,
@@ -50,7 +50,7 @@
 			read: false,
 			kind: 'incident' as const,
 			createdAt: new Date(incident.updatedAt).toLocaleString([], { hour: 'numeric', minute: '2-digit' }),
-			href: '/reports'
+			href: `/alerts/${incident.id}`
 		}))
 	]);
 
@@ -91,7 +91,7 @@
 				title: alert.title,
 				description: `${alert.severity} alert`,
 				kind: 'Alert' as const,
-				href: '/reports'
+				href: `/alerts/${alert.id}`
 			}));
 
 		const incidentMatches = mockService.getActiveIncidents()
@@ -102,7 +102,7 @@
 				title: incident.title,
 				description: `${incident.type} • ${incident.severity}`,
 				kind: 'Incident' as const,
-				href: '/reports'
+				href: `/alerts/${incident.id}`
 			}));
 
 		results.push(...sensorMatches, ...regionMatches, ...alertMatches, ...incidentMatches);

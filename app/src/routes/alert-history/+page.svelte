@@ -8,6 +8,7 @@
 	import ProgressBar from '$lib/components/ui/ProgressBar.svelte';
 	import SideDrawer from '$lib/components/ui/SideDrawer.svelte';
 	import { mockService } from '$lib/mock';
+	import { goto } from '$app/navigation';
 	import type { Incident, IncidentStatus, IncidentType, Region, Severity } from '$lib/mock/types';
 
 	// Load data from mock service
@@ -222,8 +223,7 @@
 
 	function openDrawer(incident: Incident, event?: Event) {
 		if (event) event.stopPropagation();
-		drawerIncident = incident;
-		drawerOpen = true;
+		goto(`/alerts/${incident.id}`);
 	}
 
 	function resetFilters() {
@@ -392,7 +392,7 @@
 									class="incident-row"
 									class:row-expanded={isExpanded}
 									class:row-critical={incident.severity === 'critical'}
-									onclick={() => toggleExpandRow(incident.id)}
+									onclick={() => goto(`/alerts/${incident.id}`)}
 								>
 									<td class="td-expand">
 										<button
@@ -577,7 +577,7 @@
 														<Button
 															variant="primary"
 															size="sm"
-															onclick={() => openDrawer(incident)}
+															onclick={() => goto(`/alerts/${incident.id}`)}
 														>
 															Open Full Command View
 														</Button>
