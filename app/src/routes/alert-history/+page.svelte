@@ -474,7 +474,7 @@
 										<div class="actions-cell" onclick={(e) => e.stopPropagation()}>
 											<Button
 												variant="secondary"
-												size="xs"
+												size="sm"
 												onclick={(e) => openDrawer(incident, e)}
 											>
 												Details

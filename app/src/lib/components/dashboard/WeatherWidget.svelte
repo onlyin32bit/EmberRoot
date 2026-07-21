@@ -26,7 +26,7 @@
 	function bearing(deg: number) { return WIND_DIR[Math.round(deg / 45) % 8]; }
 
 	function condLabel(c: WeatherCondition) {
-		return c.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+		return c.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
 	}
 
 	const forecast6 = weather?.forecast.slice(0, 6) ?? [];

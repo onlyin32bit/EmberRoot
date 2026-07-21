@@ -91,11 +91,11 @@ export function makeSeries(
 
 // ── Naming helpers ────────────────────────────────────────────────────────────
 
-const ADJECTIVES = ['Northern', 'Southern', 'Eastern', 'Western', 'Central', 'Upper', 'Lower', 'Outer', 'Inner', 'High'];
-const NOUNS = ['Ridge', 'Valley', 'Mesa', 'Basin', 'Canyon', 'Plateau', 'Summit', 'Hollow', 'Creek', 'Grove'];
+const REGION_PREFIXES = ['U Minh', 'Cà Mau', 'Bạc Liêu', 'Sóc Trăng', 'Long An', 'Đồng Tháp', 'Kiên Giang', 'Mekong'];
+const REGION_SUFFIXES = ['Wetlands', 'Forest', 'Estuary', 'Basin', 'Marsh', 'Delta', 'Ridge', 'Reserve'];
 
 export function regionName(): string {
-	return `${pick(ADJECTIVES)} ${pick(NOUNS)}`;
+	return `${pick(REGION_PREFIXES)} ${pick(REGION_SUFFIXES)}`;
 }
 
 // ── Severity / Status mapping ─────────────────────────────────────────────────

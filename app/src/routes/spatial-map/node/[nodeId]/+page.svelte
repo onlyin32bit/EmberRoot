@@ -1,8 +1,11 @@
 <script lang="ts">
 	import PageShell from '$lib/components/PageShell.svelte';
 	import LineAreaChart from '$lib/components/charts/LineAreaChart.svelte';
+	import TimeRangeSelector from '$lib/components/ui/TimeRangeSelector.svelte';
+	import HeatmapGrid from '$lib/components/ui/HeatmapGrid.svelte';
 	import type { PageData } from './$types';
 	import type { SeriesDef } from '$lib/components/charts/types.js';
+	import type { TimeSeries } from '$lib/mock';
 
 	let { data }: { data: PageData } = $props();
 
@@ -11,6 +14,7 @@
 	const health     = $derived(data.health);
 	const confidence = $derived(data.confidence);
 	const alerts     = $derived(data.alerts);
+	let selectedRange = $state<'24h' | '7d' | '30d'>('24h');
 
 	// ── Status helpers ─────────────────────────────────────────────────────────
 
@@ -79,45 +83,74 @@
 		return cat.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 	}
 
-	// ── Chart series definitions ────────────────────────────────────────────────
+	function sampleSeries(series: TimeSeries | undefined, count = 24): number[] {
+		if (!series?.length) return Array.from({ length: count }, () => 0);
+		if (series.length <= count) return series.map((point) => point.value);
+		const step = Math.max(1, Math.floor(series.length / count));
+		const sampled: number[] = [];
+		for (let i = 0; i < count; i += 1) {
+			const index = Math.min(series.length - 1, i * step);
+			sampled.push(series[index].value);
+		}
+		return sampled;
+	}
 
-	const tempSeries: SeriesDef[] = telemetry
-		? [{ id: 'temperature', label: 'Temperature', data: telemetry.history.temperature, color: '#f97316' }]
-		: [];
+	function selectRange(range: '24h' | '7d' | '30d') {
+		selectedRange = range;
+	}
 
-	const moistureSeries: SeriesDef[] = telemetry
-		? [{ id: 'soilMoisture', label: 'Soil Moisture', data: telemetry.history.soilMoisture, color: '#38bdf8' }]
-		: [];
+	const rangeLabel = $derived.by(() => {
+		if (selectedRange === '7d') return '7 days (30-min intervals)';
+		if (selectedRange === '30d') return '30 days (daily summaries)';
+		return '24 hours (30-min intervals)';
+	});
 
-	const groundwaterSeries: SeriesDef[] = telemetry
-		? [{ id: 'groundwaterLevel', label: 'Groundwater Level', data: telemetry.history.groundwaterLevel, color: '#818cf8' }]
-		: [];
+	const historySource = $derived.by(() => {
+		if (!telemetry) return null;
+		return selectedRange === '30d' ? telemetry.history30d : telemetry.history;
+	});
 
-	const gasSeries: SeriesDef[] = telemetry
+	const tempSeries: SeriesDef[] = $derived(telemetry
+		? [{ id: 'temperature', label: 'Temperature', data: historySource?.temperature ?? telemetry.history.temperature, color: '#f97316' }]
+		: []);
+
+	const moistureSeries: SeriesDef[] = $derived(telemetry
+		? [{ id: 'soilMoisture', label: 'Soil Moisture', data: historySource?.soilMoisture ?? telemetry.history.soilMoisture, color: '#38bdf8' }]
+		: []);
+
+	const groundwaterSeries: SeriesDef[] = $derived(telemetry
+		? [{ id: 'groundwaterLevel', label: 'Groundwater Level', data: historySource?.groundwaterLevel ?? telemetry.history.groundwaterLevel, color: '#818cf8' }]
+		: []);
+
+	const gasSeries: SeriesDef[] = $derived(telemetry
 		? [
-				{ id: 'co2Ppm',  label: 'CO₂', data: telemetry.history.co2Ppm,  color: '#fb923c' },
-				{ id: 'coPpm',   label: 'CO',  data: telemetry.history.coPpm,   color: '#facc15', filled: false }
+				{ id: 'co2Ppm', label: 'CO₂', data: historySource?.co2Ppm ?? telemetry.history.co2Ppm, color: '#fb923c' },
+				{ id: 'coPpm', label: 'CO', data: telemetry.history.coPpm, color: '#facc15', filled: false }
 		  ]
-		: [];
+		: []);
 
-	const humiditySeries: SeriesDef[] = telemetry
-		? [{ id: 'smokeIndex', label: 'Smoke Index', data: telemetry.history.smokeIndex, color: '#a78bfa' }]
-		: [];
+	const humiditySeries: SeriesDef[] = $derived(telemetry
+		? [{ id: 'humidity', label: 'Humidity', data: historySource?.humidity ?? telemetry.history.humidity, color: '#a78bfa' }]
+		: []);
 
-	const batterySeries: SeriesDef[] = telemetry
-		? [{ id: 'batteryPct', label: 'Battery', data: telemetry.history.batteryPct, color: '#4ade80' }]
-		: [];
+	const batterySeries: SeriesDef[] = $derived(telemetry
+		? [{ id: 'batteryPct', label: 'Battery', data: historySource?.batteryPct ?? telemetry.history.batteryPct, color: '#4ade80' }]
+		: []);
 
-	const signalSeries: SeriesDef[] = telemetry
-		? [{ id: 'signalStrength', label: 'RSSI', data: telemetry.history.signalStrength, color: '#67e8f9' }]
-		: [];
+	const signalSeries: SeriesDef[] = $derived(telemetry
+		? [{ id: 'signalStrength', label: 'RSSI', data: historySource?.signalStrength ?? telemetry.history.signalStrength, color: '#67e8f9' }]
+		: []);
+
+	const gasHeatmapValues = $derived(sampleSeries(historySource?.co2Ppm, 40));
+	const soilHeatmapValues = $derived(sampleSeries(historySource?.soilMoisture, 40));
+	const groundwaterHeatmapValues = $derived(sampleSeries(historySource?.groundwaterLevel, 40));
 
 	// Derived confidence display
-	const confScore  = confidence?.score  ?? 0;
-	const confLabel  = confidence?.label  ?? '—';
-	const confRisk   = confidence?.riskLevel ?? 'low';
-	const confColor  = SEVERITY_COLOR[confRisk] ?? '#6b7280';
-	const confBg     = RISK_BG[confRisk]        ?? 'rgba(107,114,128,0.12)';
+	const confScore = $derived(confidence?.score ?? 0);
+	const confLabel = $derived(confidence?.label ?? '—');
+	const confRisk = $derived(confidence?.riskLevel ?? 'low');
+	const confColor = $derived(SEVERITY_COLOR[confRisk] ?? '#6b7280');
+	const confBg = $derived(RISK_BG[confRisk] ?? 'rgba(107,114,128,0.12)');
 </script>
 
 <svelte:head>
@@ -181,7 +214,10 @@
 	<!-- ── Charts grid ─────────────────────────────────────────────────────── -->
 
 	{#if telemetry}
-		<div class="section-label">Historical Telemetry — 48h (30-min intervals)</div>
+		<div class="section-label section-label--between">
+			<span>Historical Telemetry — {selectedRange === '30d' ? '30 days (daily summaries)' : selectedRange === '7d' ? '7 days (30-min intervals)' : '24 hours (30-min intervals)'}</span>
+			<TimeRangeSelector value={selectedRange} onChange={selectRange} />
+		</div>
 
 		<div class="charts-grid">
 
@@ -259,20 +295,20 @@
 				/>
 			</div>
 
-			<!-- Smoke Index -->
+			<!-- Humidity -->
 			<div class="chart-card">
 				<div class="chart-card__header">
 					<div class="chart-card__title">
 						<span class="chart-card__dot" style="background:#a78bfa"></span>
-						Smoke Index
+						Humidity
 					</div>
-					<div class="chart-card__current">{telemetry.smokeIndex.toFixed(3)}</div>
+					<div class="chart-card__current">{telemetry.humidity.toFixed(1)} %</div>
 				</div>
 				<LineAreaChart
 					series={humiditySeries}
-					unit=""
+					unit=" %"
 					height={160}
-					formatValue={(n) => n.toFixed(3)}
+					formatValue={(n) => n.toFixed(1)}
 					showLegend={false}
 				/>
 			</div>
@@ -317,6 +353,31 @@
 				/>
 			</div>
 
+		</div>
+
+		<div class="section-label">Depth × Time Heatmaps</div>
+		<div class="heatmaps-grid">
+			<HeatmapGrid
+				values={gasHeatmapValues}
+				title="Gas Concentration"
+				unit=" ppm"
+				description="CO₂ trend across the selected window"
+				color="#fb923c"
+			/>
+			<HeatmapGrid
+				values={soilHeatmapValues}
+				title="Soil Moisture"
+				unit=" %"
+				description="Volumetric moisture profile"
+				color="#38bdf8"
+			/>
+			<HeatmapGrid
+				values={groundwaterHeatmapValues}
+				title="Groundwater"
+				unit=" m"
+				description="Subsurface depth trend"
+				color="#818cf8"
+			/>
 		</div>
 
 		<!-- ── Confidence score ───────────────────────────────────────────────── -->
@@ -458,6 +519,11 @@
 		text-transform: uppercase;
 		color: var(--text-muted);
 		margin-top: 8px;
+	}
+
+	.section-label--between {
+		justify-content: space-between;
+		margin-top: 12px;
 	}
 
 	.section-label__count {
@@ -648,6 +714,13 @@
 
 	.no-telemetry p { margin: 0; font-size: 15px; color: var(--text-secondary); }
 	.no-telemetry small { font-size: 12px; }
+
+	.heatmaps-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 12px;
+		margin-top: 10px;
+	}
 
 	/* ── Confidence panel ──────────────────────────────────────────────────── */
 
@@ -918,6 +991,10 @@
 
 		.confidence-panel {
 			flex-direction: column;
+		}
+
+		.heatmaps-grid {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>

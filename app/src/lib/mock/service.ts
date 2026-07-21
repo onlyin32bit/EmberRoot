@@ -72,20 +72,23 @@ class MockDataStore {
 		setSeed(CONFIG.seed);
 		const regions = generateRegions(CONFIG.regionCount);
 		const uMinhRegion = generateUminhRegion();
-		this._regions = [...regions, uMinhRegion];
+		const regionList = [...regions, uMinhRegion];
+		this._regions = regionList;
 
 		const standardSensors = generateSensorNodes(regions, CONFIG.sensorsPerRegion);
 		const uMinhSensors = generateUminhSensors(uMinhRegion, 56);
-		this._sensors = [...standardSensors, ...uMinhSensors];
+		const sensors = [...standardSensors, ...uMinhSensors];
+		this._sensors = sensors;
 
-		this._telemetry = generateTelemetryMap(this._sensors);
-		this._alerts = generateAlerts(this._sensors, this._regions, CONFIG.alertCount);
-		this._incidents = generateIncidents(this._regions, CONFIG.incidentCount);
-		this._weather = generateWeatherMap(this._regions);
-		this._riskIndex = generateRiskIndexMap(this._regions);
-		this._nodeHealth = new Map(this._sensors.map(s => [s.id, generateNodeHealth(s)]));
-		this._confidence = new Map(this._sensors.map(s => [s.id, generateConfidenceScore(s)]));
-		this._hotspots = new Map(this._regions.map((region) => [region.id, generateFirmsHotspots(region)]));
+		const telemetry = generateTelemetryMap(sensors);
+		this._telemetry = telemetry;
+		this._alerts = generateAlerts(sensors, regionList, CONFIG.alertCount);
+		this._incidents = generateIncidents(regionList, CONFIG.incidentCount);
+		this._weather = generateWeatherMap(regionList);
+		this._riskIndex = generateRiskIndexMap(regionList);
+		this._nodeHealth = new Map(sensors.map(s => [s.id, generateNodeHealth(s)]));
+		this._confidence = new Map(sensors.map((sensor) => [sensor.id, generateConfidenceScore(sensor, telemetry.get(sensor.id))]));
+		this._hotspots = new Map(regionList.map((region) => [region.id, generateFirmsHotspots(region)]));
 	}
 
 	private get regions()   { if (!this._regions)   this.boot(); return this._regions!; }
@@ -97,6 +100,7 @@ class MockDataStore {
 	private get riskIndex() { if (!this._riskIndex) this.boot(); return this._riskIndex!; }
 	private get nodeHealth() { if (!this._nodeHealth) this.boot(); return this._nodeHealth!; }
 	private get confidence() { if (!this._confidence) this.boot(); return this._confidence!; }
+	private get hotspots()  { if (!this._hotspots)  this.boot(); return this._hotspots!; }
 
 	// ── Regions ──────────────────────────────────────────────────────────────
 
@@ -287,6 +291,7 @@ class MockDataStore {
 		this._riskIndex = null;
 		this._nodeHealth = null;
 		this._confidence = null;
+		this._hotspots = null;
 	}
 }
 

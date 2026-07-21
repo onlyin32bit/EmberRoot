@@ -8,6 +8,7 @@
 // ─── Primitive shared types ───────────────────────────────────────────────────
 
 export type StatusLevel = 'online' | 'warning' | 'critical' | 'offline';
+export type DangerLevel = 'normal' | 'monitor' | 'suspected' | 'warning';
 export type TrendDirection = 'up' | 'down' | 'stable';
 export type Severity = 'low' | 'medium' | 'high' | 'critical';
 export type LatLon = { lat: number; lon: number };
@@ -33,6 +34,7 @@ export interface SensorNode {
 	location: LatLon;
 	elevation: number;              // metres ASL
 	status: StatusLevel;
+	dangerLevel: DangerLevel;
 	batteryPct: number;             // 0–100
 	signalStrength: number;         // dBm, typically -120..0
 	firmwareVersion: string;
@@ -252,12 +254,17 @@ export interface RiskIndex {
 	calculatedAt: number;
 	composite: number;              // 0–100 weighted composite
 	level: Severity;
+	dryDays: number;
+	groundwaterLevel: number;
+	soilMoistureAvg: number;
 	factors: {
 		fuelMoisture: RiskFactor;
 		windExposure: RiskFactor;
 		temperature: RiskFactor;
 		slopeAspect: RiskFactor;
 		humanActivity: RiskFactor;
+		groundwaterLevel: RiskFactor;
+		soilMoistureAvg: RiskFactor;
 		historicalFrequency: RiskFactor;
 	};
 	history: TimeSeries;            // composite score over past 30 days

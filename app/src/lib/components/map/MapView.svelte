@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import type { SensorNode } from '$lib/mock';
+	import { mockService, type SensorNode } from '$lib/mock';
 	import L from 'leaflet';
 	import 'leaflet/dist/leaflet.css';
 	import 'leaflet.markercluster';
@@ -60,15 +60,30 @@
 		});
 	}
 
+	function dangerLevelColor(level: SensorNode['dangerLevel']) {
+		const colors = {
+			normal: '#22c55e',
+			monitor: '#f59e0b',
+			suspected: '#fb923c',
+			warning: '#ef4444'
+		} as const;
+		return colors[level] ?? '#6b7280';
+	}
+
 	function createMarker(sensor: SensorNode) {
+		const icon = L.icon({
+			iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${sensor.status === 'offline' ? 'grey' : sensor.dangerLevel === 'warning' ? 'red' : sensor.dangerLevel === 'suspected' ? 'orange' : sensor.dangerLevel === 'monitor' ? 'gold' : 'green'}.png`,
+			shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+			iconSize: [25, 41],
+			iconAnchor: [12, 41],
+			popupAnchor: [1, -34],
+			shadowSize: [41, 41]
+		});
 		const marker = L.marker(
 			[sensor.location.lat, sensor.location.lon],
-			{ icon: statusIcon(sensor.status) }
+			{ icon }
 		)
 			.on('click', () => onSelectSensor?.(sensor.id))
-			// Permanent tooltip renders the node label below the pin.
-			// Leaflet tooltips are anchored to the marker in the Leaflet DOM
-			// tree, so they track correctly through all zoom / pan operations.
 			.bindTooltip(
 				`<div style="display:flex; align-items:center; gap:6px;">
 					<span>${sensor.id}</span>
@@ -76,11 +91,24 @@
 					<span style="color:#67e8f9; display:flex; align-items:center; gap:2px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3C6.95 3 3.15 4.85 0 7.23L12 22 24 7.23C20.85 4.85 17.05 3 12 3zm0 13.91L5.82 7.74C8 6.05 10.15 5.5 12 5.5c1.85 0 4 .55 6.18 2.24L12 16.91z"/></svg>${sensor.signalStrength}</span>
 				</div>`,
 				{
-					permanent:  true,
-					direction:  'bottom',
-					className:  'er-node-label',
-					offset:     [0, 6]
+					permanent: true,
+					direction: 'bottom',
+					className: 'er-node-label',
+					offset: [0, 6]
 				}
+			)
+			.bindPopup(
+				`<div style="font-family:'JetBrains Mono',monospace; min-width:190px; padding:3px 2px; color:#e2e8f0;">
+					<div style="font-size:12px; font-weight:700; margin-bottom:6px; color:#f59e0b;">${sensor.id}</div>
+					<div style="display:grid; gap:4px; font-size:11px;">
+						<div><span style="color:#94a3b8;">Status</span> <strong>${sensor.status}</strong></div>
+						<div><span style="color:#94a3b8;">Danger</span> <strong>${sensor.dangerLevel}</strong></div>
+						<div><span style="color:#94a3b8;">Battery</span> <strong>${sensor.batteryPct}%</strong></div>
+						<div><span style="color:#94a3b8;">Signal</span> <strong>${sensor.signalStrength} dBm</strong></div>
+						<div><span style="color:#94a3b8;">Type</span> <strong>${sensor.type}</strong></div>
+					</div>
+				</div>`,
+				{ autoPan: true, closeButton: true }
 			);
 
 		return marker;
@@ -99,37 +127,65 @@
 
 	function addHeatmap() {
 		const layer = L.layerGroup();
-		for (const sensor of sensors.slice(0, 24)) {
-			layer.addLayer(
-				L.circle([sensor.location.lat, sensor.location.lon], {
-					radius: 2400,
-					color: 'rgba(244, 63, 94, 0.18)',
-					weight: 0,
-					fillColor: 'rgba(244, 63, 94, 0.15)',
-					fillOpacity: 0.35
-				})
-			);
+		const fillColors = {
+			low: 'rgba(34, 197, 94, 0.24)',
+			medium: 'rgba(245, 158, 11, 0.28)',
+			high: 'rgba(249, 115, 22, 0.32)',
+			critical: 'rgba(239, 68, 68, 0.36)'
+		} as const;
+
+		for (const region of mockService.getRegions()) {
+			const risk = mockService.getRiskIndex(region.id);
+			const composite = risk?.composite ?? 0;
+			const level: keyof typeof fillColors = composite >= 75 ? 'critical' : composite >= 55 ? 'high' : composite >= 35 ? 'medium' : 'low';
+			const fillColor = fillColors[level];
+			const polygon = L.polygon(
+				[
+					[region.boundingBox.sw.lat, region.boundingBox.sw.lon],
+					[region.boundingBox.sw.lat, region.boundingBox.ne.lon],
+					[region.boundingBox.ne.lat, region.boundingBox.ne.lon],
+					[region.boundingBox.ne.lat, region.boundingBox.sw.lon],
+					[region.boundingBox.sw.lat, region.boundingBox.sw.lon]
+				],
+				{
+					color: fillColor,
+					weight: 1,
+					fillColor,
+					fillOpacity: 0.24
+				}
+			).bindPopup(`<div style="font-family:'JetBrains Mono',monospace; padding:4px 2px; min-width:180px; color:#e2e8f0;">
+				<div style="font-size:12px; font-weight:700; margin-bottom:6px; color:#f59e0b;">${region.name}</div>
+				<div style="display:grid; gap:4px; font-size:11px;">
+					<div><span style="color:#94a3b8;">Risk</span> <strong>${risk?.composite.toFixed(1) ?? '—'}</strong></div>
+					<div><span style="color:#94a3b8;">Dry days</span> <strong>${risk?.dryDays ?? '—'}</strong></div>
+					<div><span style="color:#94a3b8;">GW / moisture</span> <strong>${risk?.groundwaterLevel.toFixed(2) ?? '—'} m · ${risk?.soilMoistureAvg.toFixed(1) ?? '—'}%</strong></div>
+				</div>
+			</div>`);
+
+		layer.addLayer(polygon);
 		}
 		return layer;
 	}
 
 	function addFirmsHotspots() {
 		const layer = L.layerGroup();
-		for (let i = 0; i < 10; i += 1) {
-			const lat = 9.62 + Math.random() * 0.08;
-			const lon = 105.0 + Math.random() * 0.08;
+		const hotspots = mockService.getHotspotsForRegion('RG-UMINH-01');
+		for (const hotspot of hotspots) {
 			layer.addLayer(
-				L.circleMarker([lat, lon], {
-					radius: 10,
+				L.circleMarker([hotspot.location.lat, hotspot.location.lon], {
+					radius: 8 + Math.round(hotspot.intensity / 12),
 					color: '#facc15',
 					fillColor: '#fde68a',
 					fillOpacity: 0.8,
 					weight: 1.4
 				}).bindPopup(`
-					<div style="font-family:'JetBrains Mono',monospace; padding:4px;">
-						<div style="font-weight:bold; color:#ef4444; margin-bottom:4px;">FIRMS Hotspot</div>
-						<div style="font-size:12px; color:#555;">Confidence: ${Math.round(80 + Math.random()*20)}%</div>
-						<div style="font-size:12px; color:#555;">Detected: ${new Date(Date.now() - Math.random()*86400000).toLocaleString()}</div>
+					<div style="font-family:'JetBrains Mono',monospace; padding:6px 4px; min-width:200px; color:#e2e8f0;">
+						<div style="font-weight:700; color:#f59e0b; margin-bottom:6px;">FIRMS Thermal Hotspot</div>
+						<div style="display:grid; gap:4px; font-size:11px;">
+							<div><span style="color:#94a3b8;">Intensity</span> <strong>${Math.round(hotspot.intensity)}%</strong></div>
+							<div><span style="color:#94a3b8;">Confidence</span> <strong>${Math.round(hotspot.confidence)}%</strong></div>
+							<div><span style="color:#94a3b8;">Detected</span> <strong>${new Date(hotspot.detectedAt).toLocaleString()}</strong></div>
+						</div>
 					</div>
 				`)
 			);

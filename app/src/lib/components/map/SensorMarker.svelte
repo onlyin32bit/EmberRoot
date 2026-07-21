@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { SensorNode } from '$lib/mock';
-	export let sensor: SensorNode;
-	export let selected: boolean = false;
+
+	let { sensor, selected = false }: { sensor: SensorNode; selected?: boolean } = $props();
 </script>
 
 <div class="sensor-marker {selected ? 'selected' : ''}">

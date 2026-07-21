@@ -27,7 +27,19 @@ export type {
 	Hotspot,
 	RiskFactor,
 	NodeHealth,
-	ConfidenceScore
+	ConfidenceScore,
+	Alert,
+	AlertCategory,
+	Incident,
+	IncidentUpdate,
+	IncidentType,
+	IncidentStatus,
+	Region,
+	TerrainType,
+	Weather,
+	WeatherCondition,
+	WeatherForecastSlot,
+	RiskIndex
 } from './types.js';
 
 // Raw generators (for custom one-off usage or Storybook-style component testing)

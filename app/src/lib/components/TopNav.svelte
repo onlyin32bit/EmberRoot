@@ -1,5 +1,9 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { onMount } from 'svelte';
+	import { mockService } from '$lib/mock';
+	import NotificationPanel from './ui/NotificationPanel.svelte';
 
 	const navLinks = [
 		{ label: 'Dashboard',    href: '/'           },
@@ -10,6 +14,163 @@
 
 	/** Pulse state for the live indicator */
 	let liveActive = $state(true);
+	let notificationsOpen = $state(false);
+	let searchOpen = $state(false);
+	let searchQuery = $state('');
+	let selectedResultIndex = $state(0);
+	let searchInput = $state<HTMLInputElement | null>(null);
+
+	interface SearchResult {
+		id: string;
+		title: string;
+		description: string;
+		kind: 'Sensor' | 'Region' | 'Alert' | 'Incident';
+		href: string;
+	}
+
+	let notificationItems = $state([
+		...mockService.getActiveAlerts().slice(0, 3).map((alert) => ({
+			id: alert.id,
+			title: alert.title,
+			message: alert.message,
+			read: false,
+			kind: 'alert' as const,
+			createdAt: new Date(alert.triggeredAt).toLocaleString([], { hour: 'numeric', minute: '2-digit' }),
+			href: '/reports'
+		})),
+		...mockService.getActiveIncidents().slice(0, 2).map((incident) => ({
+			id: incident.id,
+			title: incident.title,
+			message: `${incident.type} • ${incident.severity} severity`,
+			read: false,
+			kind: 'incident' as const,
+			createdAt: new Date(incident.updatedAt).toLocaleString([], { hour: 'numeric', minute: '2-digit' }),
+			href: '/reports'
+		}))
+	]);
+
+	const unreadCount = $derived(notificationItems.filter((item) => !item.read).length);
+
+	let searchResults = $derived.by(() => {
+		const term = searchQuery.trim().toLowerCase();
+		if (!term) return [];
+
+		const results: SearchResult[] = [];
+		const sensorMatches = mockService.getSensors()
+			.filter((sensor) => sensor.id.toLowerCase().includes(term) || sensor.name.toLowerCase().includes(term))
+			.slice(0, 4)
+			.map((sensor) => ({
+				id: sensor.id,
+				title: sensor.name,
+				description: `${sensor.id} • ${sensor.status}`,
+				kind: 'Sensor' as const,
+				href: `/spatial-map/node/${sensor.id}`
+			}));
+
+		const regionMatches = mockService.getRegions()
+			.filter((region) => region.name.toLowerCase().includes(term) || region.code.toLowerCase().includes(term))
+			.slice(0, 3)
+			.map((region) => ({
+				id: region.id,
+				title: region.name,
+				description: `${region.code} • ${region.terrain}`,
+				kind: 'Region' as const,
+				href: `/spatial-map?region=${region.id}`
+			}));
+
+		const alertMatches = mockService.getActiveAlerts()
+			.filter((alert) => alert.title.toLowerCase().includes(term) || alert.message.toLowerCase().includes(term))
+			.slice(0, 3)
+			.map((alert) => ({
+				id: alert.id,
+				title: alert.title,
+				description: `${alert.severity} alert`,
+				kind: 'Alert' as const,
+				href: '/reports'
+			}));
+
+		const incidentMatches = mockService.getActiveIncidents()
+			.filter((incident) => incident.title.toLowerCase().includes(term) || incident.description.toLowerCase().includes(term))
+			.slice(0, 3)
+			.map((incident) => ({
+				id: incident.id,
+				title: incident.title,
+				description: `${incident.type} • ${incident.severity}`,
+				kind: 'Incident' as const,
+				href: '/reports'
+			}));
+
+		results.push(...sensorMatches, ...regionMatches, ...alertMatches, ...incidentMatches);
+		return results.slice(0, 8);
+	});
+
+	function closePanels() {
+		notificationsOpen = false;
+		searchOpen = false;
+	}
+
+	function openSearch() {
+		searchOpen = true;
+		notificationsOpen = false;
+		searchQuery = '';
+		selectedResultIndex = 0;
+		requestAnimationFrame(() => searchInput?.focus());
+	}
+
+	function handleSearchSubmit() {
+		const target = searchResults[selectedResultIndex];
+		if (!target) return;
+		goto(target.href);
+		closePanels();
+	}
+
+	function toggleNotifications() {
+		notificationsOpen = !notificationsOpen;
+		searchOpen = false;
+	}
+
+	function markNotificationRead(id: string) {
+		notificationItems = notificationItems.map((item) => (item.id === id ? { ...item, read: true } : item));
+	}
+
+	function markAllNotificationsRead() {
+		notificationItems = notificationItems.map((item) => ({ ...item, read: true }));
+	}
+
+	function handleNotificationSelect(item: { id: string; href?: string }) {
+		markNotificationRead(item.id);
+		closePanels();
+		if (item.href) {
+			goto(item.href);
+		}
+	}
+
+	onMount(() => {
+		const handleKeydown = (event: KeyboardEvent) => {
+			if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+				event.preventDefault();
+				openSearch();
+			}
+
+			if (event.key === 'Escape') {
+				closePanels();
+			}
+		};
+
+		const handlePointerDown = (event: PointerEvent) => {
+			const target = event.target as HTMLElement | null;
+			if (!target?.closest('.topnav')) {
+				closePanels();
+			}
+		};
+
+		window.addEventListener('keydown', handleKeydown);
+		window.addEventListener('pointerdown', handlePointerDown);
+		return () => {
+			window.removeEventListener('keydown', handleKeydown);
+			window.removeEventListener('pointerdown', handlePointerDown);
+		};
+	});
 </script>
 
 <header class="topnav">
@@ -60,6 +221,65 @@
 
 	<!-- Right cluster -->
 	<div class="topnav__actions">
+		<div class="topnav__search" class:topnav__search--open={searchOpen}>
+			<button class="topnav__search-trigger" type="button" onclick={openSearch} aria-label="Open global search">
+				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+					<circle cx="11" cy="11" r="6"/>
+					<path d="M20 20L16.65 16.65"/>
+				</svg>
+				<span>Search nodes, regions, alerts</span>
+			</button>
+			{#if searchOpen}
+				<div class="topnav__search-popover">
+					<input
+						bind:this={searchInput}
+						bind:value={searchQuery}
+						class="topnav__search-input"
+						type="text"
+						placeholder="Search sensor nodes, regions, alerts"
+						onkeydown={(event) => {
+							if (event.key === 'ArrowDown') {
+								event.preventDefault();
+								selectedResultIndex = Math.min(selectedResultIndex + 1, Math.max(searchResults.length - 1, 0));
+							}
+							if (event.key === 'ArrowUp') {
+								event.preventDefault();
+								selectedResultIndex = Math.max(selectedResultIndex - 1, 0);
+							}
+							if (event.key === 'Enter') {
+								event.preventDefault();
+								handleSearchSubmit();
+							}
+						}}
+					/>
+					{#if searchResults.length > 0}
+						<div class="topnav__search-list">
+							{#each searchResults as result, index}
+								<button
+									type="button"
+									class="topnav__search-item"
+									class:topnav__search-item--active={index === selectedResultIndex}
+									onclick={() => {
+										selectedResultIndex = index;
+										goto(result.href);
+										closePanels();
+									}}
+								>
+									<div class="topnav__search-item-top">
+										<span class="topnav__search-item-kind">{result.kind}</span>
+										<span class="topnav__search-item-title">{result.title}</span>
+									</div>
+									<div class="topnav__search-item-description">{result.description}</div>
+								</button>
+							{/each}
+						</div>
+					{:else if searchQuery.trim()}
+						<div class="topnav__search-empty">No matches. Try another term.</div>
+					{/if}
+				</div>
+			{/if}
+		</div>
+
 		<!-- Live status badge -->
 		<div class="topnav__status" title="System live">
 			<span class="topnav__status-dot" class:topnav__status-dot--pulse={liveActive} aria-hidden="true"></span>
@@ -69,13 +289,16 @@
 		<div class="topnav__divider" aria-hidden="true"></div>
 
 		<!-- Notification bell -->
-		<button id="btn-notifications" class="topnav__icon-btn" aria-label="Notifications" title="Notifications">
-			<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-				<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-				<path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-			</svg>
-			<span class="topnav__badge" aria-label="3 notifications">3</span>
-		</button>
+		<div class="topnav__notifications">
+			<button id="btn-notifications" class="topnav__icon-btn" aria-label="Notifications" title="Notifications" onclick={toggleNotifications}>
+				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+					<path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+				</svg>
+				<span class="topnav__badge" aria-label="{unreadCount} unread notifications">{unreadCount}</span>
+			</button>
+			<NotificationPanel open={notificationsOpen} notifications={notificationItems} onClose={closePanels} onMarkAllRead={markAllNotificationsRead} onMarkRead={markNotificationRead} onSelect={handleNotificationSelect} />
+		</div>
 
 		<!-- Settings -->
 		<button id="btn-settings" class="topnav__icon-btn" aria-label="Settings" title="Settings">
@@ -200,6 +423,118 @@
 		align-items: center;
 		gap: 8px;
 		flex-shrink: 0;
+		position: relative;
+	}
+
+	.topnav__search {
+		position: relative;
+	}
+
+	.topnav__search-trigger {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-width: 220px;
+		padding: 8px 12px;
+		border-radius: 999px;
+		border: 1px solid rgba(255,255,255,0.08);
+		background: rgba(255,255,255,0.045);
+		color: var(--text-secondary);
+		font-size: 12px;
+		cursor: pointer;
+	}
+
+	.topnav__search-trigger:hover {
+		background: rgba(255,255,255,0.08);
+		color: var(--text-primary);
+	}
+
+	.topnav__search--open .topnav__search-trigger {
+		border-color: rgba(240,120,64,0.3);
+		box-shadow: inset 0 0 0 1px rgba(240,120,64,0.08);
+	}
+
+	.topnav__search-popover {
+		position: absolute;
+		top: calc(100% + 10px);
+		right: 0;
+		min-width: 320px;
+		padding: 8px;
+		background: rgba(15,23,42,0.96);
+		border: 1px solid rgba(255,255,255,0.12);
+		border-radius: 14px;
+		box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
+		backdrop-filter: blur(18px);
+		z-index: 1100;
+	}
+
+	.topnav__search-input {
+		width: 100%;
+		padding: 10px 12px;
+		border-radius: 10px;
+		border: 1px solid rgba(255,255,255,0.08);
+		background: rgba(255,255,255,0.05);
+		color: var(--text-primary);
+		font-size: 13px;
+		outline: none;
+	}
+
+	.topnav__search-input:focus {
+		border-color: rgba(240,120,64,0.35);
+	}
+
+	.topnav__search-list {
+		display: grid;
+		gap: 6px;
+		margin-top: 8px;
+	}
+
+	.topnav__search-item {
+		text-align: left;
+		padding: 8px 10px;
+		border-radius: 10px;
+		border: 1px solid transparent;
+		background: rgba(255,255,255,0.03);
+		color: var(--text-primary);
+		cursor: pointer;
+	}
+
+	.topnav__search-item--active {
+		border-color: rgba(240,120,64,0.3);
+		background: rgba(240,120,64,0.12);
+	}
+
+	.topnav__search-item-top {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		margin-bottom: 3px;
+	}
+
+	.topnav__search-item-kind {
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+	}
+
+	.topnav__search-item-title {
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.topnav__search-item-description {
+		font-size: 11px;
+		color: var(--text-muted);
+	}
+
+	.topnav__search-empty {
+		margin-top: 8px;
+		padding: 10px;
+		font-size: 12px;
+		color: var(--text-muted);
 	}
 
 	.topnav__status {

@@ -52,16 +52,16 @@ import {
 const TERRAIN_TYPES: TerrainType[] = ['forest', 'grassland', 'urban', 'coastal', 'mountainous'];
 const RISK_WEIGHTS = [0.15, 0.25, 0.30, 0.20, 0.10]; // none → critical more likely in mid-range
 
-/** Base lat/lon centres — realistic California/Pacific coast spread */
+/** Base lat/lon centres tuned for a Southeast Asian peatland monitoring network */
 const REGION_CENTRES: LatLon[] = [
-	{ lat: 37.682, lon: -122.088 }, // East Bay
-	{ lat: 37.310, lon: -121.910 }, // Santa Clara hills
-	{ lat: 38.142, lon: -122.252 }, // Napa Valley
-	{ lat: 37.903, lon: -122.532 }, // Marin ridge
-	{ lat: 36.993, lon: -121.957 }, // Scotts Valley
-	{ lat: 38.576, lon: -122.490 }, // Lake County
-	{ lat: 37.498, lon: -122.195 }, // Hayward hills
-	{ lat: 38.312, lon: -122.464 }  // Sonoma valley
+	{ lat: 9.78, lon: 105.08 }, // U Minh wetlands
+	{ lat: 10.68, lon: 105.36 }, // An Giang delta
+	{ lat: 10.17, lon: 105.74 }, // Đồng Tháp marsh
+	{ lat: 11.92, lon: 109.13 }, // Nha Trang coast
+	{ lat: 10.95, lon: 108.16 }, // Phú Yên basin
+	{ lat: 12.24, lon: 109.18 }, // Quảng Ngãi ridge
+	{ lat: 9.35, lon: 105.90 }, // Cà Mau estuary
+	{ lat: 9.98, lon: 106.55 }  // Bạc Liêu reserve
 ];
 
 export function generateRegion(index: number): Region {
@@ -121,6 +121,10 @@ export function generateUminhSensors(region: Region, count = 56): SensorNode[] {
 		const battery = randInt(6, 100);
 		const locLat = parseFloat((region.center.lat + (rand() - 0.5) * 0.14).toFixed(5));
 		const locLon = parseFloat((region.center.lon + (rand() - 0.5) * 0.16).toFixed(5));
+		const signalStrength = randInt(-110, -48);
+		const baseTemp = randFloat(22, 40);
+		const baseCo2 = randInt(420, 1800);
+		const baseMoisture = randFloat(8, 42, 1);
 		return {
 			id: uid('UM', index + 1),
 			name: `UM Sensor ${String(index + 1).padStart(2, '0')}`,
@@ -129,8 +133,9 @@ export function generateUminhSensors(region: Region, count = 56): SensorNode[] {
 			location: { lat: locLat, lon: locLon },
 			elevation: randInt(1, 80),
 			status: sensorStatus(battery),
+			dangerLevel: deriveDangerLevel({ batteryPct: battery, signalStrength, telemetry: { temperature: baseTemp, co2Ppm: baseCo2, soilMoisture: baseMoisture } }),
 			batteryPct: battery,
-			signalStrength: randInt(-110, -48),
+			signalStrength,
 			firmwareVersion: pick(FIRMWARE_VERSIONS),
 			lastSeenAt: msAgo(randInt(120_000, battery < 15 ? 4_500_000 : 160_000)),
 			deployedAt: daysAgo(randInt(10, 540))
@@ -177,10 +182,27 @@ function sensorStatus(battery: number): import('./types.js').StatusLevel {
 	return 'online';
 }
 
+function deriveDangerLevel(input: { batteryPct: number; signalStrength: number; telemetry?: Partial<Telemetry> | null }): import('./types.js').DangerLevel {
+	const telemetry = input.telemetry;
+	const tempRisk = telemetry?.temperature ? (telemetry.temperature > 35 ? 0.55 : 0.12) : 0.2;
+	const co2Risk = telemetry?.co2Ppm ? (telemetry.co2Ppm > 1400 ? 0.65 : 0.1) : 0.15;
+	const moistureRisk = telemetry?.soilMoisture ? (telemetry.soilMoisture < 18 ? 0.65 : 0.1) : 0.12;
+	const signalRisk = input.signalStrength < -95 ? 0.2 : 0.05;
+	const score = tempRisk * 0.35 + co2Risk * 0.3 + moistureRisk * 0.25 + signalRisk * 0.1;
+	if (score > 0.5) return 'warning';
+	if (score > 0.3) return 'suspected';
+	if (score > 0.15) return 'monitor';
+	return 'normal';
+}
+
 export function generateSensorNode(index: number, region: Region): SensorNode {
 	const battery = randInt(2, 100);
 	const latOff = (rand() - 0.5) * 0.15;
 	const lonOff = (rand() - 0.5) * 0.20;
+	const signalStrength = randInt(-105, -40);
+	const baseTemp = randFloat(20, 42);
+	const baseCo2 = randInt(380, 1800);
+	const baseMoisture = randFloat(8, 46, 1);
 
 	return {
 		id: uid('SN', index + 1),
@@ -193,8 +215,9 @@ export function generateSensorNode(index: number, region: Region): SensorNode {
 		},
 		elevation: randInt(10, 1400),
 		status: sensorStatus(battery),
+		dangerLevel: deriveDangerLevel({ batteryPct: battery, signalStrength, telemetry: { temperature: baseTemp, co2Ppm: baseCo2, soilMoisture: baseMoisture } }),
 		batteryPct: battery,
-		signalStrength: randInt(-105, -40),
+		signalStrength,
 		firmwareVersion: pick(FIRMWARE_VERSIONS),
 		lastSeenAt: msAgo(randInt(1000, battery < 15 ? 3_600_000 : 120_000)),
 		deployedAt: daysAgo(randInt(30, 730))
@@ -224,6 +247,9 @@ export function generateTelemetry(sensor: SensorNode): Telemetry {
 	const baseMoisture    = randFloat(12, 48, 1);
 	const baseGroundwater = randFloat(-4.5, -1.6);
 	const baseHumidity    = randFloat(12, 85);
+
+	const dangerLevel = deriveDangerLevel({ batteryPct: sensor.batteryPct, signalStrength: sensor.signalStrength, telemetry: { temperature: baseTemp, co2Ppm: baseCo2, soilMoisture: baseMoisture } });
+	const updatedSensor: SensorNode = { ...sensor, dangerLevel };
 
 	return {
 		id: shortId(),
@@ -275,9 +301,7 @@ export function generateTelemetry(sensor: SensorNode): Telemetry {
 export function generateTelemetryMap(sensors: SensorNode[]): Map<string, Telemetry> {
 	const map = new Map<string, Telemetry>();
 	for (const s of sensors) {
-		if (s.status !== 'offline') {
-			map.set(s.id, generateTelemetry(s));
-		}
+		map.set(s.id, generateTelemetry(s));
 	}
 	return map;
 }
@@ -308,15 +332,29 @@ export function generateNodeHealth(sensor: SensorNode): NodeHealth {
 	};
 }
 
-export function generateConfidenceScore(sensor: SensorNode): ConfidenceScore {
-	const score = Math.min(100, Math.max(5, Math.round(sensor.batteryPct * 0.6 + (sensor.signalStrength + 120) * 0.3 + randInt(0, 30))));
+export function generateConfidenceScore(sensor: SensorNode, telemetryOverride?: Partial<Telemetry> | null): ConfidenceScore {
+	const telemetry = telemetryOverride ? {
+		temperature: telemetryOverride.temperature ?? randFloat(20, 42),
+		co2Ppm: telemetryOverride.co2Ppm ?? randInt(380, 1900),
+		soilMoisture: telemetryOverride.soilMoisture ?? randFloat(6, 48, 1)
+	} : {
+		temperature: randFloat(20, 42),
+		co2Ppm: randInt(380, 1900),
+		soilMoisture: randFloat(6, 48, 1)
+	};
+	const tempRisk = telemetry.temperature > 35 ? 0.6 : telemetry.temperature > 28 ? 0.35 : 0.1;
+	const co2Risk = telemetry.co2Ppm > 1400 ? 0.65 : telemetry.co2Ppm > 950 ? 0.3 : 0.1;
+	const moistureRisk = telemetry.soilMoisture < 18 ? 0.7 : telemetry.soilMoisture < 26 ? 0.35 : 0.1;
+	const signalRisk = sensor.signalStrength < -95 ? 0.2 : 0.05;
+	const riskScore = Math.round((tempRisk * 0.35 + co2Risk * 0.3 + moistureRisk * 0.25 + signalRisk * 0.1) * 100);
+	const score = Math.max(8, Math.min(100, riskScore));
 	const label = score >= 75 ? 'Critical' : score >= 55 ? 'High' : score >= 35 ? 'Moderate' : 'Low';
 	const level: Severity = score >= 75 ? 'critical' : score >= 55 ? 'high' : score >= 35 ? 'medium' : 'low';
 	const explanation = [
-		`Temperature change consistent with smoldering activity`,
-		`CO₂ elevated relative to surrounding baseline`,
-		`${sensor.signalStrength} dBm signal suggests stable connectivity`,
-		`${sensor.batteryPct}% battery remaining`
+		telemetry.temperature > 35 ? 'Temperature exceeds the smoldering-risk threshold.' : 'Temperature remains within the expected envelope.',
+		telemetry.co2Ppm > 1400 ? 'CO₂ is elevated relative to the local baseline.' : 'CO₂ is stable for the current conditions.',
+		telemetry.soilMoisture < 18 ? 'Soil moisture is very low, increasing ignition potential.' : 'Soil moisture is within the monitored range.',
+		`${sensor.signalStrength} dBm signal remains ${sensor.signalStrength < -95 ? 'weaker than ideal' : 'stable'} for the node.`
 	];
 
 	return {
@@ -325,10 +363,10 @@ export function generateConfidenceScore(sensor: SensorNode): ConfidenceScore {
 		label,
 		riskLevel: level,
 		factors: {
-			temperature: score > 65 ? 'Strong upward trend' : 'Moderate',
-			co2: score > 55 ? 'Elevated' : 'Stable',
-			moisture: score > 70 ? 'Low' : 'Acceptable',
-			signal: score > 50 ? 'Stable' : 'Weak'
+			temperature: telemetry.temperature > 35 ? 'Elevated' : telemetry.temperature > 28 ? 'Moderate' : 'Low',
+			co2: telemetry.co2Ppm > 1400 ? 'Elevated' : telemetry.co2Ppm > 950 ? 'Moderate' : 'Low',
+			moisture: telemetry.soilMoisture < 18 ? 'Dry' : telemetry.soilMoisture < 26 ? 'Moderate' : 'Moist',
+			signal: sensor.signalStrength < -95 ? 'Weak' : 'Stable'
 		},
 		explanation,
 		updatedAt: Date.now() - randInt(120_000, 1_800_000)
@@ -535,27 +573,34 @@ function makeRiskFactor(label: string, weight: number): RiskFactor {
 }
 
 export function generateRiskIndex(region: Region): RiskIndex {
+	const groundwaterLevel = parseFloat((randFloat(-4.8, -1.3) * 1.1).toFixed(2));
+	const soilMoistureAvg = randFloat(8, 40, 1);
+	const dryDays = randInt(8, 90);
+	const groundwaterFactor = Math.max(0, Math.min(100, (1 - (Math.abs(groundwaterLevel) - 1.3) / 3.5) * 100));
+	const moistureFactor = Math.max(0, Math.min(100, (1 - (soilMoistureAvg / 40)) * 100));
+	const dryDaysFactor = Math.max(0, Math.min(100, (dryDays / 90) * 100));
+	const composite = parseFloat((groundwaterFactor * 0.4 + moistureFactor * 0.4 + dryDaysFactor * 0.2).toFixed(1));
 	const factors = {
-		fuelMoisture:       makeRiskFactor('Fuel Moisture Content', 0.25),
-		windExposure:       makeRiskFactor('Wind Exposure',         0.20),
-		temperature:        makeRiskFactor('Surface Temperature',   0.18),
-		slopeAspect:        makeRiskFactor('Slope & Aspect',        0.15),
-		humanActivity:      makeRiskFactor('Human Activity Index',  0.12),
+		fuelMoisture:       makeRiskFactor('Fuel Moisture Content', 0.20),
+		windExposure:       makeRiskFactor('Wind Exposure',         0.16),
+		temperature:        makeRiskFactor('Surface Temperature',   0.14),
+		slopeAspect:        makeRiskFactor('Slope & Aspect',        0.12),
+		humanActivity:      makeRiskFactor('Human Activity Index',  0.10),
+		groundwaterLevel:   makeRiskFactor('Groundwater Level',      0.18),
+		soilMoistureAvg:    makeRiskFactor('Soil Moisture',         0.16),
 		historicalFrequency: makeRiskFactor('Historical Frequency', 0.10)
 	};
-
-	const composite = Object.values(factors).reduce(
-		(sum, f) => sum + f.score * f.weight, 0
-	);
-	const normalized = parseFloat(Math.min(100, composite * 1.04).toFixed(1));
 
 	return {
 		regionId: region.id,
 		calculatedAt: msAgo(randInt(300_000, 3_600_000)),
-		composite: normalized,
-		level: scoreToSeverity(normalized),
+		composite,
+		level: scoreToSeverity(composite),
+		dryDays,
+		groundwaterLevel,
+		soilMoistureAvg,
 		factors,
-		history: makeSeries(normalized, 30, 86_400_000, 8, [0, 100]),
+		history: makeSeries(composite, 30, 86_400_000, 8, [0, 100]),
 		nextReviewAt: hoursAhead(randInt(1, 6))
 	};
 }
