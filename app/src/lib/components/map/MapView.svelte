@@ -36,20 +36,47 @@
 		})
 	};
 
-	function statusColor(status: string) {
-		switch (status) {
-			case 'online': return '#22c55e';
-			case 'warning': return '#f59e0b';
-			case 'critical': return '#ef4444';
-			case 'offline': return '#374151';
-			default: return '#64748b';
-		}
+	// ── Colour-coded marker icons (pointhi/leaflet-color-markers) ─────────────
+	// These are standard Leaflet marker PNGs with the default anchor/size,
+	// so positioning remains stable through all zoom and pan operations.
+
+	const MARKER_BASE = 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img';
+
+	function statusIcon(status: string): L.Icon {
+		const color = {
+			online:   'green',
+			warning:  'gold',
+			critical: 'red',
+			offline:  'grey'
+		}[status] ?? 'grey';
+
+		return L.icon({
+			iconUrl:       `${MARKER_BASE}/marker-icon-2x-${color}.png`,
+			shadowUrl:     'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+			iconSize:      [25, 41],
+			iconAnchor:    [12, 41],
+			popupAnchor:   [1, -34],
+			shadowSize:    [41, 41]
+		});
 	}
 
 	function createMarker(sensor: SensorNode) {
-		return L.marker(
-			[sensor.location.lat, sensor.location.lon]
-		).on('click', () => onSelectSensor?.(sensor.id));
+		const marker = L.marker(
+			[sensor.location.lat, sensor.location.lon],
+			{ icon: statusIcon(sensor.status) }
+		)
+			.on('click', () => onSelectSensor?.(sensor.id))
+			// Permanent tooltip renders the node label below the pin.
+			// Leaflet tooltips are anchored to the marker in the Leaflet DOM
+			// tree, so they track correctly through all zoom / pan operations.
+			.bindTooltip(sensor.id, {
+				permanent:  true,
+				direction:  'bottom',
+				className:  'er-node-label',
+				offset:     [0, 6]
+			});
+
+		return marker;
 	}
 
 	function buildSensorLayer() {
@@ -228,45 +255,27 @@
 		overflow: hidden;
 	}
 
-	:global(.er-map-marker) {
-		position: relative;
-		width: 96px;
-		height: 84px;
-		overflow: visible;
-	}
-
-	:global(.er-map-marker-inner) {
-		position: relative;
-		width: 100%;
-		height: 100%;
-	}
-
-	:global(.er-map-marker-ring) {
-		position: absolute;
-		top: 18px;
-		left: 50%;
-		transform: translateX(-50%);
-		width: 18px;
-		height: 18px;
-		border-radius: 999px;
-		box-shadow: 0 0 0 4px rgba(15, 23, 42, 0.8);
-	}
-
-	:global(.er-map-marker-label) {
-		position: absolute;
-		top: 42px;
-		left: 50%;
-		transform: translateX(-50%);
-		font-size: 12px;
-		font-weight: 800;
-		color: white;
-		background: rgba(15, 23, 42, 0.96);
-		padding: 8px 12px;
-		border-radius: 999px;
-		border: 1px solid rgba(255, 255, 255, 0.22);
-		box-shadow: 0 16px 32px rgba(0, 0, 0, 0.4);
+	/*
+	 * Permanent node-label tooltips.
+	 * These are Leaflet-managed tooltip elements — positioned by Leaflet's own
+	 * anchor logic so they stay locked to the marker through zoom and pan.
+	 */
+	:global(.er-node-label) {
+		background: rgba(15, 23, 42, 0.88);
+		border: 1px solid rgba(255, 255, 255, 0.14);
+		border-radius: 6px;
+		color: #e2e8f0;
+		font-size: 10px;
+		font-weight: 700;
+		font-family: 'JetBrains Mono', monospace;
+		padding: 3px 8px;
 		white-space: nowrap;
-		text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-		z-index: 10;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+		pointer-events: none;
+	}
+
+	/* Hide the default Leaflet tooltip arrow for permanent labels */
+	:global(.er-node-label::before) {
+		display: none;
 	}
 </style>
