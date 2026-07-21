@@ -572,7 +572,7 @@ function makeRiskFactor(label: string, weight: number): RiskFactor {
 	};
 }
 
-export function generateRiskIndex(region: Region): RiskIndex {
+export function generateRiskIndex(region: Region, weatherOverride?: Weather): RiskIndex {
 	const groundwaterLevel = parseFloat((randFloat(-4.8, -1.3) * 1.1).toFixed(2));
 	const soilMoistureAvg = randFloat(8, 40, 1);
 	const dryDays = randInt(8, 90);
@@ -590,6 +590,25 @@ export function generateRiskIndex(region: Region): RiskIndex {
 		soilMoistureAvg:    makeRiskFactor('Soil Moisture',         0.16),
 		historicalFrequency: makeRiskFactor('Historical Frequency', 0.10)
 	};
+	const weather = weatherOverride ?? generateWeather(region);
+	const forecast = Array.from({ length: 7 }, (_, offset) => {
+		const slot = weather.forecast[offset] ?? weather.forecast[weather.forecast.length - 1];
+		const weatherBias = slot.condition === 'thunderstorm'
+			? 8
+			: slot.condition === 'smoke'
+				? 10
+				: slot.condition === 'rain'
+					? -4
+					: slot.condition === 'fog'
+						? 5
+						: slot.condition === 'overcast'
+							? 3
+							: 0;
+		const windBias = Math.max(-8, Math.min(10, (slot.windSpeedKph - 18) / 4));
+		const humidityBias = slot.humidity > 70 ? -4 : slot.humidity < 20 ? 4 : 0;
+		const projected = Math.max(0, Math.min(100, composite + weatherBias + windBias + humidityBias + offset * 0.8));
+		return { timestamp: Date.now() + offset * 86_400_000, value: parseFloat(projected.toFixed(1)) };
+	});
 
 	return {
 		regionId: region.id,
@@ -601,12 +620,13 @@ export function generateRiskIndex(region: Region): RiskIndex {
 		soilMoistureAvg,
 		factors,
 		history: makeSeries(composite, 30, 86_400_000, 8, [0, 100]),
+		forecast,
 		nextReviewAt: hoursAhead(randInt(1, 6))
 	};
 }
 
-export function generateRiskIndexMap(regions: Region[]): Map<string, RiskIndex> {
+export function generateRiskIndexMap(regions: Region[], weatherMap?: Map<string, Weather>): Map<string, RiskIndex> {
 	const map = new Map<string, RiskIndex>();
-	for (const r of regions) map.set(r.id, generateRiskIndex(r));
+	for (const r of regions) map.set(r.id, generateRiskIndex(r, weatherMap?.get(r.id)));
 	return map;
 }

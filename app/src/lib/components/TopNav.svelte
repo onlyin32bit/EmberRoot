@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { mockService } from '$lib/mock';
+	import { selectedRegionId } from '$lib/stores/regionContext';
 	import NotificationPanel from './ui/NotificationPanel.svelte';
 
 	const navLinks = [
@@ -19,6 +20,9 @@
 	let searchQuery = $state('');
 	let selectedResultIndex = $state(0);
 	let searchInput = $state<HTMLInputElement | null>(null);
+	let regionOptions = $derived(
+		[{ id: 'all', label: 'Global Command' }, ...mockService.getRegions().map((region) => ({ id: region.id, label: region.name }))]
+	);
 
 	interface SearchResult {
 		id: string;
@@ -221,6 +225,15 @@
 
 	<!-- Right cluster -->
 	<div class="topnav__actions">
+		<div class="topnav__region-selector">
+			<label class="topnav__region-label" for="region-select">Context</label>
+			<select id="region-select" class="topnav__region-select" bind:value={$selectedRegionId}>
+				{#each regionOptions as option}
+					<option value={option.id}>{option.label}</option>
+				{/each}
+			</select>
+		</div>
+
 		<div class="topnav__search" class:topnav__search--open={searchOpen}>
 			<button class="topnav__search-trigger" type="button" onclick={openSearch} aria-label="Open global search">
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -424,6 +437,32 @@
 		gap: 8px;
 		flex-shrink: 0;
 		position: relative;
+	}
+
+	.topnav__region-selector {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 7px 10px;
+		border-radius: 999px;
+		border: 1px solid rgba(255,255,255,0.08);
+		background: rgba(255,255,255,0.045);
+	}
+
+	.topnav__region-label {
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+	}
+
+	.topnav__region-select {
+		border: 0;
+		background: transparent;
+		color: var(--text-primary);
+		font-size: 12px;
+		outline: none;
 	}
 
 	.topnav__search {

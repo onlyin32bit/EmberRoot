@@ -51,6 +51,10 @@
 	}
 
 	const replaySnapshots = $derived(getReplayPoint(replayIndex));
+	const activeRiskScore = $derived.by(() => {
+		const risk = Math.round(replaySnapshots.reduce((sum, item) => sum + (item.status === 'offline' ? 92 : item.status === 'warning' ? 64 : 18), 0) / Math.max(replaySnapshots.length, 1));
+		return Math.max(8, Math.min(100, risk));
+	});
 
 	const summary = $derived.by(() => {
 		const counts = replaySnapshots.reduce(
@@ -202,7 +206,8 @@
 						class:timeline-strip__cell--active={index === replayIndex}
 						onclick={() => jumpTo(index)}
 						style={`height:${Math.max(8, point)}%`}
-						aria-label={`Jump to replay step ${index + 1}`}
+						title={`${point}% risk for this replay step`}
+						aria-label={`Jump to replay step ${index + 1} with ${point}% risk`}
 					></button>
 				{/each}
 			</div>

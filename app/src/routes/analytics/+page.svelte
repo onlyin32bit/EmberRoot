@@ -5,27 +5,35 @@
 	import NodeHealthPanel from '$lib/components/dashboard/NodeHealthPanel.svelte';
 	import RecentAnomalies from '$lib/components/dashboard/RecentAnomalies.svelte';
 	import { mockService } from '$lib/mock';
+	import { selectedRegionId } from '$lib/stores/regionContext';
 
-	const sensors = mockService.getSensors();
-	const primarySensor = sensors.find((s) => s.status === 'online') ?? sensors[0];
-	const telemetry = primarySensor ? mockService.getTelemetry(primarySensor.id) : null;
-	const nodeHealth = primarySensor ? mockService.getNodeHealth(primarySensor.id) : null;
+	const resolvedRegionId = $derived($selectedRegionId === 'all' ? 'RG-UMINH-01' : $selectedRegionId);
+	const region = $derived(mockService.getRegion(resolvedRegionId));
+	const sensors = $derived(
+		$selectedRegionId === 'all'
+			? mockService.getSensors()
+			: mockService.getSensorsForRegion(resolvedRegionId)
+	);
+	const primarySensor = $derived(sensors.find((s) => s.status === 'online') ?? sensors[0]);
+	const telemetry = $derived(primarySensor ? mockService.getTelemetry(primarySensor.id) : null);
+	const nodeHealth = $derived(primarySensor ? mockService.getNodeHealth(primarySensor.id) : null);
 
-	const tempSeries = telemetry?.history.temperature ?? [];
-	const tempSub = tempSeries.map((point, index) => ({ timestamp: point.timestamp, value: Math.max(0, point.value - 2.2 - index * 0.02) }));
-	const coRatioSeries = telemetry
+	const tempSeries = $derived(telemetry?.history.temperature ?? []);
+	const tempSub = $derived(tempSeries.map((point, index) => ({ timestamp: point.timestamp, value: Math.max(0, point.value - 2.2 - index * 0.02) })));
+	const coRatioSeries = $derived(telemetry
 		? telemetry.history.coPpm.map((point: { timestamp: number; value: number }, index: number) => {
 			const co2Point = telemetry.history.co2Ppm[index];
 			const value = co2Point?.value ? parseFloat((point.value / co2Point.value).toFixed(3)) : 0;
 			return { timestamp: point.timestamp, value };
 		})
-		: [];
-	const moistureSeries = telemetry?.history.soilMoisture ?? [];
-	const groundwaterSeries = telemetry?.history.groundwaterLevel ?? [];
-	const batterySeries = telemetry?.history.batteryPct ?? [];
-	const signalSeries = telemetry?.history.signalStrength.map((p) => ({ timestamp: p.timestamp, value: Math.min(100, Math.max(0, p.value + 120)) })) ?? [];
-
-	const sensorLabel = primarySensor ? `${primarySensor.name} · ${primarySensor.type.toUpperCase()}` : 'Sensor';
+		: []);
+	const moistureSeries = $derived(telemetry?.history.soilMoisture ?? []);
+	const groundwaterSeries = $derived(telemetry?.history.groundwaterLevel ?? []);
+	const batterySeries = $derived(telemetry?.history.batteryPct ?? []);
+	const signalSeries = $derived(telemetry?.history.signalStrength.map((p) => ({ timestamp: p.timestamp, value: Math.min(100, Math.max(0, p.value + 120)) })) ?? []);
+	const riskIndex = $derived(mockService.getRiskIndex(resolvedRegionId));
+	const forecastSeries = $derived(riskIndex?.forecast ? riskIndex.forecast.map((point) => ({ timestamp: point.timestamp, value: point.value })) : []);
+	const sensorLabel = $derived(primarySensor ? `${primarySensor.name} · ${primarySensor.type.toUpperCase()} · ${region?.name ?? 'Global'}` : 'Sensor');
 </script>
 
 <svelte:head>
@@ -61,6 +69,12 @@
 	<div class="small-chart">
 		<ChartContainer title="Soil Moisture & Groundwater" subtitle="Sensor hydrology trend">
 			<LineAreaChart series={[{ id: 'moisture', label: 'Soil Moisture (%)', data: moistureSeries, color: 'var(--status-online)' }, { id: 'groundwater', label: 'Groundwater Depth (m)', data: groundwaterSeries, color: 'var(--status-critical)', filled: false }]} unit="" height={140} showLegend={true} />
+		</ChartContainer>
+	</div>
+
+	<div class="small-chart">
+		<ChartContainer title="7-Day Risk Forecast" subtitle={riskIndex ? `${riskIndex.level.toUpperCase()} outlook for ${region?.name ?? 'selected region'}` : 'Projected risk trend'}>
+			<LineAreaChart series={[{ id: 'forecast', label: 'Forecasted Risk Score', data: forecastSeries, color: 'var(--ember-400)' }]} unit="" height={140} showLegend={false} />
 		</ChartContainer>
 	</div>
 

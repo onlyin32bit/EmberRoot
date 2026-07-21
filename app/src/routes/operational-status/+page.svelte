@@ -5,15 +5,46 @@
 	import MetricCard from '$lib/components/ui/MetricCard.svelte';
 	import ProgressBar from '$lib/components/ui/ProgressBar.svelte';
 	import { mockService } from '$lib/mock';
+	import { selectedRegionId } from '$lib/stores/regionContext';
 	import type { Alert, Incident, Region, Severity, StatusLevel } from '$lib/mock';
 
-	const summary = mockService.getSummaryStats();
-	const regions = mockService.getRegions().slice().sort((a, b) => severityWeight(b.riskLevel) - severityWeight(a.riskLevel));
-	const activeAlerts = mockService.getActiveAlerts().slice(0, 5);
-	const activeIncidents = mockService.getActiveIncidents().slice(0, 4);
-	const readinessScore = Math.round((summary.onlineSensors / Math.max(summary.totalSensors, 1)) * 100);
-	const commandCoverage = Math.max(60, Math.min(98, 92 - summary.unacknowledged * 3));
-	const communicationsHealth = Math.max(72, Math.min(100, 100 - summary.criticalAlerts * 4));
+	const resolvedRegionId = $derived($selectedRegionId === 'all' ? null : $selectedRegionId);
+	const region = $derived(resolvedRegionId ? mockService.getRegion(resolvedRegionId) : null);
+	const summary = $derived.by(() => {
+		if (!resolvedRegionId) return mockService.getSummaryStats();
+		const sensors = mockService.getSensorsForRegion(resolvedRegionId);
+		const alerts = mockService.getAlertsForRegion(resolvedRegionId);
+		const incidents = mockService.getIncidentsForRegion(resolvedRegionId);
+		return {
+			totalSensors: sensors.length,
+			onlineSensors: sensors.filter((sensor) => sensor.status === 'online').length,
+			warningSensors: sensors.filter((sensor) => sensor.status === 'warning').length,
+			offlineSensors: sensors.filter((sensor) => sensor.status === 'offline').length,
+			criticalSensors: sensors.filter((sensor) => sensor.status === 'critical').length,
+			totalAlerts: alerts.length,
+			activeAlerts: alerts.filter((alert) => alert.resolvedAt === null).length,
+			unacknowledged: alerts.filter((alert) => !alert.acknowledged).length,
+			criticalAlerts: alerts.filter((alert) => alert.severity === 'critical').length,
+			totalIncidents: incidents.length,
+			activeIncidents: incidents.filter((incident) => incident.status === 'active').length,
+			containedIncidents: incidents.filter((incident) => incident.status === 'contained').length,
+			resolvedIncidents: incidents.filter((incident) => incident.status === 'resolved').length,
+			totalRegions: mockService.getRegions().length,
+			highRiskRegions: mockService.getHighRiskRegions(65).filter((risk) => risk.regionId === resolvedRegionId).length
+		};
+	});
+	const regions = $derived(
+		(resolvedRegionId
+			? [mockService.getRegion(resolvedRegionId)].filter((value): value is Region => !!value)
+			: mockService.getRegions())
+		.slice()
+		.sort((a, b) => severityWeight(b.riskLevel) - severityWeight(a.riskLevel))
+	);
+	const activeAlerts = $derived((resolvedRegionId ? mockService.getAlertsForRegion(resolvedRegionId) : mockService.getActiveAlerts()).slice(0, 5));
+	const activeIncidents = $derived((resolvedRegionId ? mockService.getIncidentsForRegion(resolvedRegionId) : mockService.getActiveIncidents()).slice(0, 4));
+	const readinessScore = $derived(Math.round((summary.onlineSensors / Math.max(summary.totalSensors, 1)) * 100));
+	const commandCoverage = $derived(Math.max(60, Math.min(98, 92 - summary.unacknowledged * 3)));
+	const communicationsHealth = $derived(Math.max(72, Math.min(100, 100 - summary.criticalAlerts * 4)));
 
 	function severityWeight(level: Severity) {
 		return level === 'critical' ? 4 : level === 'high' ? 3 : level === 'medium' ? 2 : 1;
@@ -90,6 +121,18 @@
 		</div>
 
 		<div class="hero-grid">
+			<Card variant="raised" padding="lg" class="hero-card">
+				<div class="hero-header">
+					<div>
+						<div class="hero-eyebrow">Active context</div>
+						<h3 class="hero-title">{region ? region.name : 'Global Command'}</h3>
+					</div>
+					<Badge variant="neutral">{region ? region.code : 'ALL'}</Badge>
+				</div>
+				<p class="hero-copy">
+					{region ? `${region.sensorCount} sensors • ${region.activeIncidents} active incidents` : 'Cross-region command posture'}
+				</p>
+			</Card>
 			<Card variant="raised" padding="lg" class="hero-card">
 				<div class="hero-header">
 					<div>

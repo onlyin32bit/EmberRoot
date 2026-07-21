@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { mockService } from '$lib/mock';
+	import { selectedRegionId } from '$lib/stores/regionContext';
 	import type { SeriesDef } from '$lib/components/charts';
 
 	// Widgets
@@ -18,38 +19,43 @@
 	import Button from '$lib/components/ui/Button.svelte';
 
 	// ── Pull telemetry for representative sensors ─────────────────────────────
-	const sensors = mockService.getSensors();
-	const onlines = sensors.filter(s => s.status === 'online');
-	const sample  = onlines.slice(0, 4);
-	const telems  = sample.map(s => mockService.getTelemetry(s.id)).filter(Boolean);
+	const resolvedRegionId = $derived($selectedRegionId === 'all' ? null : $selectedRegionId);
+	const sensors = $derived(resolvedRegionId ? mockService.getSensorsForRegion(resolvedRegionId) : mockService.getSensors());
+	const onlines = $derived(sensors.filter(s => s.status === 'online'));
+	const sample  = $derived(onlines.slice(0, 4));
+	const telems  = $derived(sample.map(s => mockService.getTelemetry(s.id)).filter(Boolean));
 
 	// ── Scalar averages for card values ──────────────────────────────────────
-	const avgTemp     = telems.reduce((s, t) => s + t!.temperature, 0)        / (telems.length || 1);
-	const avgHumidity = telems.reduce((s, t) => s + t!.humidity, 0)            / (telems.length || 1);
-	const avgWind     = telems.reduce((s, t) => s + t!.windSpeed, 0)           / (telems.length || 1);
-	const avgCO2      = telems.reduce((s, t) => s + t!.co2Ppm, 0)              / (telems.length || 1);
-	const avgSmoke    = telems.reduce((s, t) => s + t!.smokeIndex, 0)          / (telems.length || 1);
-	const avgPM25     = telems.reduce((s, t) => s + t!.particulateMatter, 0)   / (telems.length || 1);
+	const avgTemp     = $derived(telems.reduce((s, t) => s + t!.temperature, 0)        / (telems.length || 1));
+	const avgHumidity = $derived(telems.reduce((s, t) => s + t!.humidity, 0)            / (telems.length || 1));
+	const avgWind     = $derived(telems.reduce((s, t) => s + t!.windSpeed, 0)           / (telems.length || 1));
+	const avgCO2      = $derived(telems.reduce((s, t) => s + t!.co2Ppm, 0)              / (telems.length || 1));
+	const avgSmoke    = $derived(telems.reduce((s, t) => s + t!.smokeIndex, 0)          / (telems.length || 1));
+	const avgPM25     = $derived(telems.reduce((s, t) => s + t!.particulateMatter, 0)   / (telems.length || 1));
 
 	// ── Full TimeSeries for interactive sparklines ────────────────────────────
-	const tempSeries  = telems[0]?.history.temperature ?? [];
-	const smokeSeries = telems[0]?.history.smokeIndex  ?? [];
-	const windSeries  = telems[0]?.history.windSpeed   ?? [];
+	const tempSeries  = $derived(telems[0]?.history.temperature ?? []);
+	const smokeSeries = $derived(telems[0]?.history.smokeIndex  ?? []);
+	const windSeries  = $derived(telems[0]?.history.windSpeed   ?? []);
 	// Smoke scaled to % for display
-	const smokeSeriesPct = smokeSeries.map(p => ({ timestamp: p.timestamp, value: p.value * 100 }));
+	const smokeSeriesPct = $derived(smokeSeries.map(p => ({ timestamp: p.timestamp, value: p.value * 100 })));
 
 	// ── Overview chart series ──────────────────────────────────────────────────
-	const tempChartSeries: SeriesDef[] = [
+	const tempChartSeries = $derived.by(() => [
 		{ id: 'temperature', label: 'Temperature (°C)',  data: tempSeries,     color: 'var(--ember-400)' },
 		{ id: 'smoke',       label: 'Smoke Index ×100',  data: smokeSeriesPct, color: 'var(--status-warning)', filled: false },
-	];
+	] as SeriesDef[]);
 
-	const riskHistory = mockService.getHighRiskRegions(0)[0]
-		? mockService.getRiskIndex(mockService.getHighRiskRegions(0)[0].regionId)?.history ?? []
-		: [];
-	const riskChartSeries: SeriesDef[] = [
+	const riskHistory = $derived(
+		resolvedRegionId
+			? mockService.getRiskIndex(resolvedRegionId)?.history ?? []
+			: (mockService.getHighRiskRegions(0)[0]
+				? mockService.getRiskIndex(mockService.getHighRiskRegions(0)[0].regionId)?.history ?? []
+				: [])
+	);
+	const riskChartSeries = $derived.by(() => [
 		{ id: 'risk', label: 'Risk Composite Score', data: riskHistory, color: 'var(--ember-300)' },
-	];
+	] as SeriesDef[]);
 
 	const now    = new Date();
 	const nowStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });

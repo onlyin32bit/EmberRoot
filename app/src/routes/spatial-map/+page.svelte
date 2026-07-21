@@ -1,6 +1,7 @@
 <script lang="ts">
 import { onMount } from 'svelte';
 import { mockService, type Telemetry, type NodeHealth, type ConfidenceScore } from '$lib/mock';
+import { selectedRegionId } from '$lib/stores/regionContext';
 import PageShell from '$lib/components/PageShell.svelte';
 import SideDrawer from '$lib/components/ui/SideDrawer.svelte';
 import MapView from '$lib/components/map/MapView.svelte';
@@ -10,21 +11,21 @@ import MapLegend from '$lib/components/map/MapLegend.svelte';
 import SearchPanel from '$lib/components/map/SearchPanel.svelte';
 import FilterBar from '$lib/components/map/FilterBar.svelte';
 
-const regionId = 'RG-UMINH-01';
-const region = mockService.getRegion(regionId);
-const sensors = region ? mockService.getSensorsForRegion(regionId) : [];
-const telemetryMap = new Map<string, Telemetry | undefined>(
+const resolvedRegionId = $derived($selectedRegionId === 'all' ? 'RG-UMINH-01' : $selectedRegionId);
+const region = $derived(mockService.getRegion(resolvedRegionId));
+const sensors = $derived(region ? mockService.getSensorsForRegion(resolvedRegionId) : []);
+const telemetryMap = $derived(new Map<string, Telemetry | undefined>(
 	sensors.map((sensor) => [sensor.id, mockService.getTelemetry(sensor.id)])
-);
-const healthMap = new Map<string, NodeHealth | undefined>(
+));
+const healthMap = $derived(new Map<string, NodeHealth | undefined>(
 	sensors.map((sensor) => [sensor.id, mockService.getNodeHealth(sensor.id)])
-);
-const confidenceMap = new Map<string, ConfidenceScore | undefined>(
+));
+const confidenceMap = $derived(new Map<string, ConfidenceScore | undefined>(
 	sensors.map((sensor) => [sensor.id, mockService.getConfidenceScore(sensor.id)])
-);
+));
 
-const initialSensorId = sensors[0]?.id ?? null;
-let selectedSensorId = $state<string | null>(initialSensorId);
+const initialSensorId = $derived(sensors[0]?.id ?? null);
+let selectedSensorId = $state<string | null>(null);
 let activeLayers = $state({
 	sensorNodes: true,
 	sensorConnections: false,
@@ -35,7 +36,7 @@ let activeLayers = $state({
 });
 let searchResults = $state<{ id: string; title: string; details: string; coords: [number, number] }[]>([]);
 let mapReady = $state(false);
-let drawerOpen = $state(initialSensorId !== null);
+let drawerOpen = $state(false);
 let filterStatus = $state<string | null>(null);
 
 const filteredSensors = $derived(

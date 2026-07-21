@@ -85,7 +85,7 @@ class MockDataStore {
 		this._alerts = generateAlerts(sensors, regionList, CONFIG.alertCount);
 		this._incidents = generateIncidents(regionList, CONFIG.incidentCount);
 		this._weather = generateWeatherMap(regionList);
-		this._riskIndex = generateRiskIndexMap(regionList);
+		this._riskIndex = generateRiskIndexMap(regionList, this._weather);
 		this._nodeHealth = new Map(sensors.map(s => [s.id, generateNodeHealth(s)]));
 		this._confidence = new Map(sensors.map((sensor) => [sensor.id, generateConfidenceScore(sensor, telemetry.get(sensor.id))]));
 		this._hotspots = new Map(regionList.map((region) => [region.id, generateFirmsHotspots(region)]));

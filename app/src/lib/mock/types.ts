@@ -268,5 +268,6 @@ export interface RiskIndex {
 		historicalFrequency: RiskFactor;
 	};
 	history: TimeSeries;            // composite score over past 30 days
+	forecast: TimeSeries;          // 7-day forward-looking trajectory
 	nextReviewAt: number;
 }
