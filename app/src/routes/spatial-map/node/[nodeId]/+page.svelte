@@ -95,6 +95,15 @@
 		return sampled;
 	}
 
+	function sliceHistoryRange(series: TimeSeries | undefined, range: '24h' | '7d' | '30d'): TimeSeries {
+		if (!series?.length) return [];
+		if (range === '24h') {
+			const points = 48;
+			return series.slice(Math.max(0, series.length - points));
+		}
+		return series;
+	}
+
 	function selectRange(range: '24h' | '7d' | '30d') {
 		selectedRange = range;
 	}
@@ -107,7 +116,22 @@
 
 	const historySource = $derived.by(() => {
 		if (!telemetry) return null;
-		return selectedRange === '30d' ? telemetry.history30d : telemetry.history;
+		if (selectedRange === '30d') return telemetry.history30d;
+		if (selectedRange === '24h') {
+			return {
+				temperature: sliceHistoryRange(telemetry.history.temperature, '24h'),
+				humidity: sliceHistoryRange(telemetry.history.humidity, '24h'),
+				smokeIndex: sliceHistoryRange(telemetry.history.smokeIndex, '24h'),
+				windSpeed: sliceHistoryRange(telemetry.history.windSpeed, '24h'),
+				coPpm: sliceHistoryRange(telemetry.history.coPpm, '24h'),
+				co2Ppm: sliceHistoryRange(telemetry.history.co2Ppm, '24h'),
+				soilMoisture: sliceHistoryRange(telemetry.history.soilMoisture, '24h'),
+				groundwaterLevel: sliceHistoryRange(telemetry.history.groundwaterLevel, '24h'),
+				batteryPct: sliceHistoryRange(telemetry.history.batteryPct, '24h'),
+				signalStrength: sliceHistoryRange(telemetry.history.signalStrength, '24h')
+			};
+		}
+		return telemetry.history;
 	});
 
 	const tempSeries: SeriesDef[] = $derived(telemetry
