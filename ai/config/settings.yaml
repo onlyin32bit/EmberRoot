@@ -1,0 +1,27 @@
+project:
+  name: "EmberBrain"
+  version: "1.0.0"
+
+kriging:
+  kernel: "RBF" # Radial Basis Function
+  length_scale: 10.0
+  noise_level: 0.1
+
+pinn:
+  epochs: 1000
+  learning_rate: 0.001
+  hidden_layers: [64, 64, 64]
+  lambda_residuals:
+    heat: 1.0
+    oxygen: 1.0
+    moisture: 1.0
+
+simulation:
+  grid_size: [50, 50, 20] # X, Y, Z depth
+  dx: 0.1 # meters per cell
+  dt: 60.0 # seconds per step
+
+assimilation:
+  ensemble_size: 50
+  inflation_factor: 1.05
+  observation_noise: 0.2
