@@ -23,6 +23,7 @@
 	let regionOptions = $derived(
 		[{ id: 'all', label: 'Global Command' }, ...mockService.getRegions().map((region) => ({ id: region.id, label: region.name }))]
 	);
+	let regionDropdownOpen = $state(false);
 
 	interface SearchResult {
 		id: string;
@@ -111,6 +112,7 @@
 	function closePanels() {
 		notificationsOpen = false;
 		searchOpen = false;
+		regionDropdownOpen = false;
 	}
 
 	function openSearch() {
@@ -165,6 +167,10 @@
 			const target = event.target as HTMLElement | null;
 			if (!target?.closest('.topnav')) {
 				closePanels();
+			} else {
+				if (!target?.closest('.topnav__region-selector')) regionDropdownOpen = false;
+				if (!target?.closest('.topnav__search')) searchOpen = false;
+				if (!target?.closest('.topnav__notifications') && !target?.closest('#btn-notifications')) notificationsOpen = false;
 			}
 		};
 
@@ -225,13 +231,33 @@
 
 	<!-- Right cluster -->
 	<div class="topnav__actions">
-		<div class="topnav__region-selector">
-			<label class="topnav__region-label" for="region-select">Context</label>
-			<select id="region-select" class="topnav__region-select" bind:value={$selectedRegionId}>
-				{#each regionOptions as option}
-					<option value={option.id}>{option.label}</option>
-				{/each}
-			</select>
+		<div class="topnav__region-selector" aria-label="Select operational context">
+			<button class="topnav__region-button" type="button" onclick={() => { regionDropdownOpen = !regionDropdownOpen; searchOpen = false; notificationsOpen = false; }}>
+				<div class="topnav__region-badge">
+					<span class="topnav__region-dot" aria-hidden="true"></span>
+					<span class="topnav__region-label">Context</span>
+				</div>
+				<span class="topnav__region-value">
+					{regionOptions.find(o => o.id === $selectedRegionId)?.label ?? 'Select Region'}
+				</span>
+			</button>
+			{#if regionDropdownOpen}
+				<div class="topnav__region-popover">
+					{#each regionOptions as option}
+						<button 
+							type="button" 
+							class="topnav__region-option"
+							class:topnav__region-option--active={$selectedRegionId === option.id}
+							onclick={() => { $selectedRegionId = option.id; regionDropdownOpen = false; }}
+						>
+							{option.label}
+							{#if $selectedRegionId === option.id}
+								<svg class="topnav__region-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+							{/if}
+						</button>
+					{/each}
+				</div>
+			{/if}
 		</div>
 
 		<div class="topnav__search" class:topnav__search--open={searchOpen}>
@@ -440,29 +466,133 @@
 	}
 
 	.topnav__region-selector {
+		position: relative;
+	}
+
+	.topnav__region-button {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		padding: 7px 10px;
-		border-radius: 999px;
-		border: 1px solid rgba(255,255,255,0.08);
-		background: rgba(255,255,255,0.045);
+		gap: 10px;
+		padding: 6px 32px 6px 14px;
+		border-radius: 12px;
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		background: rgba(15, 23, 42, 0.6);
+		box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 4px 12px rgba(0, 0, 0, 0.2);
+		transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+		cursor: pointer;
+		color: inherit;
+		text-align: left;
+	}
+
+	.topnav__region-button:hover,
+	.topnav__region-button:focus-visible {
+		border-color: rgba(240, 120, 64, 0.4);
+		background: rgba(15, 23, 42, 0.8);
+		box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(240, 120, 64, 0.1), 0 8px 20px -8px rgba(240, 120, 64, 0.3);
+		transform: translateY(-1px);
+	}
+
+	.topnav__region-button::after {
+		content: '';
+		position: absolute;
+		right: 14px;
+		top: 50%;
+		width: 7px;
+		height: 7px;
+		border-right: 2px solid var(--text-muted);
+		border-bottom: 2px solid var(--text-muted);
+		transform: translateY(-70%) rotate(45deg);
+		transition: border-color 0.2s ease, transform 0.2s ease;
+		pointer-events: none;
+	}
+
+	.topnav__region-button:hover::after,
+	.topnav__region-button:focus-visible::after {
+		border-color: var(--ember-300);
+		transform: translateY(-60%) rotate(45deg);
+	}
+
+	.topnav__region-badge {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.topnav__region-dot {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: var(--ember-400);
+		box-shadow: 0 0 8px var(--ember-400);
 	}
 
 	.topnav__region-label {
-		font-size: 10px;
-		font-weight: 700;
-		letter-spacing: 0.08em;
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 0.04em;
 		text-transform: uppercase;
 		color: var(--text-muted);
+		pointer-events: none;
 	}
 
-	.topnav__region-select {
-		border: 0;
-		background: transparent;
+	.topnav__region-value {
+		font-size: 13px;
+		font-weight: 600;
 		color: var(--text-primary);
-		font-size: 12px;
-		outline: none;
+		pointer-events: none;
+	}
+
+	.topnav__region-popover {
+		position: absolute;
+		top: calc(100% + 8px);
+		right: 0;
+		min-width: 220px;
+		padding: 6px;
+		background: rgba(15, 23, 42, 0.96);
+		border: 1px solid rgba(255,255,255,0.12);
+		border-radius: 12px;
+		box-shadow: 0 16px 32px rgba(0, 0, 0, 0.4);
+		backdrop-filter: blur(18px);
+		z-index: 1100;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.topnav__region-option {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+		padding: 8px 12px;
+		border: none;
+		background: transparent;
+		color: var(--text-secondary);
+		font-size: 13px;
+		font-weight: 500;
+		text-align: left;
+		border-radius: 8px;
+		cursor: pointer;
+		transition: all 0.15s ease;
+	}
+
+	.topnav__region-option:hover {
+		background: rgba(255, 255, 255, 0.05);
+		color: var(--text-primary);
+	}
+
+	.topnav__region-option--active {
+		background: rgba(240, 120, 64, 0.12);
+		color: var(--text-primary);
+		font-weight: 600;
+	}
+
+	.topnav__region-option--active:hover {
+		background: rgba(240, 120, 64, 0.18);
+	}
+
+	.topnav__region-check {
+		color: var(--ember-400);
 	}
 
 	.topnav__search {

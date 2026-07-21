@@ -13,6 +13,7 @@
 	let replayIndex = $state(0);
 	let isPlaying = $state(true);
 	let playbackSpeed = $state(1);
+	let hoveredStep = $state<number | null>(null);
 	let timer: ReturnType<typeof setInterval> | null = null;
 
 	function statusTone(status: 'online' | 'warning' | 'offline') {
@@ -196,7 +197,15 @@
 					<div class="timeline-card__eyebrow">Risk pulse</div>
 					<div class="timeline-card__title">Animated risk score over time</div>
 				</div>
-				<Badge variant="warning" size="sm">{replayIndex + 1}/{replayLength} steps</Badge>
+				<div class="timeline-card__meta">
+					<div class="timeline-card__preview">
+						<span class="timeline-card__preview-label">{hoveredStep !== null ? 'Preview' : 'Current'}</span>
+						<span class="timeline-card__preview-value">
+							{hoveredStep !== null ? timeline[hoveredStep] : activeRiskScore}% risk
+						</span>
+					</div>
+					<Badge variant="warning" size="sm">{replayIndex + 1}/{replayLength} steps</Badge>
+				</div>
 			</div>
 			<div class="timeline-strip" role="list" aria-label="Replay timeline">
 				{#each timeline as point, index}
@@ -205,7 +214,9 @@
 						class="timeline-strip__cell"
 						class:timeline-strip__cell--active={index === replayIndex}
 						onclick={() => jumpTo(index)}
-						style={`height:${Math.max(8, point)}%`}
+						onmouseenter={() => (hoveredStep = index)}
+						onmouseleave={() => (hoveredStep = null)}
+						style={`--cell-height:${Math.max(8, point)}%`}
 						title={`${point}% risk for this replay step`}
 						aria-label={`Jump to replay step ${index + 1} with ${point}% risk`}
 					></button>
@@ -366,31 +377,99 @@
 		gap: 12px;
 	}
 
+	.timeline-card__meta {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+
+	.timeline-card__preview {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 7px 10px;
+		border-radius: 999px;
+		background: rgba(240, 120, 64, 0.12);
+		border: 1px solid rgba(240, 120, 64, 0.22);
+	}
+
+	.timeline-card__preview-label {
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+	}
+
+	.timeline-card__preview-value {
+		font-size: 12px;
+		font-weight: 700;
+		color: var(--ember-300);
+	}
+
 	.timeline-strip {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(6px, 1fr));
 		gap: 4px;
 		align-items: end;
-		min-height: 120px;
+		min-height: 140px;
+		padding: 6px 2px 2px;
+	}
+
+	.timeline-strip:hover .timeline-strip__cell:not(:hover):not(.timeline-strip__cell--active) {
+		opacity: 0.4;
+		transform: scaleY(0.95);
 	}
 
 	.timeline-strip__cell {
+		position: relative;
 		border: 0;
 		border-radius: 999px 999px 4px 4px;
-		background: linear-gradient(180deg, rgba(240, 120, 64, 0.95), rgba(240, 120, 64, 0.18));
+		background: linear-gradient(180deg, rgba(240, 120, 64, 0.4), rgba(240, 120, 64, 0.1));
 		min-height: 8px;
+		height: var(--cell-height);
 		cursor: pointer;
-		transition: transform 0.16s ease, filter 0.16s ease;
+		transform-origin: bottom center;
+		opacity: 0.7;
+		transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+		box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
 	}
 
-	.timeline-strip__cell:hover {
-		transform: translateY(-1px);
-		filter: brightness(1.08);
+	.timeline-strip__cell::before {
+		content: '';
+		position: absolute;
+		inset: 0;
+		border-radius: inherit;
+		background: linear-gradient(180deg, rgba(240, 120, 64, 1), rgba(240, 120, 64, 0.3));
+		opacity: 0;
+		transition: opacity 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+	}
+
+	.timeline-strip__cell:hover,
+	.timeline-strip__cell:focus-visible {
+		opacity: 1;
+		transform: scaleY(1.1) translateY(-2px);
+		box-shadow: 0 8px 16px -6px rgba(240, 120, 64, 0.6);
+		z-index: 2;
+	}
+
+	.timeline-strip__cell:hover::before,
+	.timeline-strip__cell:focus-visible::before {
+		opacity: 1;
 	}
 
 	.timeline-strip__cell--active {
-		outline: 2px solid rgba(255, 255, 255, 0.28);
-		outline-offset: 2px;
+		opacity: 1;
+		background: linear-gradient(180deg, var(--ember-300), var(--ember-500));
+		transform: scaleY(1.05);
+		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2), 0 8px 24px -8px rgba(240, 120, 64, 0.8);
+		z-index: 1;
+	}
+
+	.timeline-strip__cell--active::before {
+		opacity: 1;
+		background: linear-gradient(180deg, #fff, transparent);
+		mix-blend-mode: overlay;
 	}
 
 	.node-list {
