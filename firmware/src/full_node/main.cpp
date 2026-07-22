@@ -7,7 +7,8 @@
 #include <SoftwareSerial.h>
 
 #ifndef MQTT_BROKER
-#define MQTT_BROKER "tcp://broker.hivemq.com:1883"
+// Hostname only. The firmware adds tcp:// and MQTT_PORT below.
+#define MQTT_BROKER "broker.hivemq.com"
 #endif
 
 #ifndef MQTT_PORT
@@ -40,16 +41,21 @@ DHT dht(DHTPIN, DHTTYPE);
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 SoftwareSerial simSerial(3, 2);
 
-void publishMQTT(String payload);
+bool publishMQTT(const String& payload);
 bool waitResponse(const char* expected, uint32_t timeoutMs);
 bool sendCommand(const char* cmd, const char* expected, uint32_t timeoutMs);
 bool checkSimInternet();
+bool startMQTTService();
+bool cleanupMQTT(bool connected, bool clientAcquired, bool serviceStarted);
+void appendJsonFloat(String& json, float value);
 
 bool waitResponse(const char* expected, uint32_t timeoutMs)
 {
   uint32_t startTime = millis();
   uint16_t matchIndex = 0;
   uint16_t expectedLen = strlen(expected);
+  const char errorResponse[] = "ERROR";
+  uint8_t errorMatchIndex = 0;
   
   while (millis() - startTime < timeoutMs)
   {
@@ -69,6 +75,20 @@ bool waitResponse(const char* expected, uint32_t timeoutMs)
       else
       {
         matchIndex = (c == expected[0]) ? 1 : 0;
+      }
+
+      // Do not wait for the full timeout after the modem has rejected a command.
+      if (c == errorResponse[errorMatchIndex])
+      {
+        errorMatchIndex++;
+        if (errorMatchIndex == sizeof(errorResponse) - 1)
+        {
+          return false;
+        }
+      }
+      else
+      {
+        errorMatchIndex = (c == errorResponse[0]) ? 1 : 0;
       }
     }
   }
@@ -218,7 +238,9 @@ bool checkSimInternet()
 
 void setup()
 {
-  Serial.begin(9600);
+  // Keep the debug UART faster than the modem SoftwareSerial link so printing
+  // modem responses cannot fill the SoftwareSerial receive buffer.
+  Serial.begin(115200);
   
   // Try to connect at 115200 first to configure/force the module to 9600 baud rate
   Serial.println(F("Configuring SIM module baud rate..."));
@@ -260,24 +282,115 @@ void loop()
 {
   float t = dht.readTemperature();
   float h = dht.readHumidity();
+
+  // DHT sensors occasionally fail a read. Give the slow DHT11 one retry.
+  if (isnan(t) || isnan(h))
+  {
+    delay(2000);
+    t = dht.readTemperature();
+    h = dht.readHumidity();
+  }
+
   float tempObj = mlx.readObjectTempC();
   int mq2 = analogRead(MQ2_PIN);
   int mq7 = analogRead(MQ7_PIN);
   int soil = analogRead(SOIL_PIN);
 
-  String data = "{\"t\":" + String(t) + ",\"h\":" + String(h) +
-                ",\"tempObj\":" + String(tempObj) +
-                ",\"mq2\":" + String(mq2) +
-                ",\"mq7\":" + String(mq7) +
-                ",\"soil\":" + String(soil) + "}";
+  // JSON does not support NaN. Use null for a failed sensor read so EMQX and
+  // downstream JSON consumers can still parse the rest of the measurements.
+  String data;
+  data.reserve(128);
+  data = F("{\"node_id\":\"");
+  data += MQTT_CLIENT_ID;
+  data += F("\",\"t\":");
+  appendJsonFloat(data, t);
+  data += F(",\"h\":");
+  appendJsonFloat(data, h);
+  data += F(",\"tempObj\":");
+  appendJsonFloat(data, tempObj);
+  data += F(",\"mq2\":");
+  data += mq2;
+  data += F(",\"mq7\":");
+  data += mq7;
+  data += F(",\"soil\":");
+  data += soil;
+  data += '}';
 
   Serial.println("Data to send: " + data);
-  publishMQTT(data);
+  if (!publishMQTT(data))
+  {
+    Serial.println(F("MQTT publish cycle FAILED"));
+  }
 
   delay(60000);
 }
 
-void publishMQTT(String payload)
+void appendJsonFloat(String& json, float value)
+{
+  if (isnan(value) || isinf(value))
+  {
+    json += F("null");
+  }
+  else
+  {
+    json += String(value, 2);
+  }
+}
+
+bool startMQTTService()
+{
+  // CMQTTSTART is asynchronous: the initial OK only acknowledges the command;
+  // +CMQTTSTART: 0 confirms that the service actually started.
+  if (sendCommand("AT+CMQTTSTART", "+CMQTTSTART: 0", 10000))
+  {
+    return true;
+  }
+
+  // A previous MCU reset may leave client 0 allocated inside the modem. Clear
+  // that stale state and retry once. Failures here are harmless when a given
+  // resource was not active.
+  Serial.println(F("MQTT service was already/still active; resetting modem MQTT state..."));
+  sendCommand("AT+CMQTTDISC=0,60", "+CMQTTDISC: 0,0", 5000);
+  sendCommand("AT+CMQTTREL=0", "OK", 2000);
+  sendCommand("AT+CMQTTSTOP", "+CMQTTSTOP: 0", 5000);
+
+  if (!sendCommand("AT+CMQTTSTART", "+CMQTTSTART: 0", 10000))
+  {
+    Serial.println(F("MQTT service start failed!"));
+    return false;
+  }
+
+  return true;
+}
+
+bool cleanupMQTT(bool connected, bool clientAcquired, bool serviceStarted)
+{
+  bool success = true;
+
+  if (connected && !sendCommand("AT+CMQTTDISC=0,120", "+CMQTTDISC: 0,0", 10000))
+  {
+    Serial.println(F("Warning: MQTT disconnect failed"));
+    success = false;
+  }
+
+  // The A76xx command is CMQTTREL (not CMQTTRELEASE). A client must be
+  // released before CMQTTSTOP, otherwise CMQTTSTOP returns error 19.
+  if (clientAcquired && !sendCommand("AT+CMQTTREL=0", "OK", 3000))
+  {
+    Serial.println(F("Warning: MQTT client release failed"));
+    success = false;
+  }
+
+  if (serviceStarted && !sendCommand("AT+CMQTTSTOP", "+CMQTTSTOP: 0", 10000))
+  {
+    Serial.println(F("Warning: MQTT service stop failed"));
+    success = false;
+  }
+
+  return success;
+}
+
+bool publishMQTT(const String& payload)
 {
   Serial.println(F("Publishing to MQTT broker..."));
 
@@ -316,21 +429,36 @@ void publishMQTT(String payload)
   if (!netOpen)
   {
     Serial.println(F("Error: Network (NETOPEN) could not be opened!"));
-    return;
+    return false;
   }
 
-  // 2. Start MQTT service (might return error if already started, which we bypass)
-  sendCommand("AT+CMQTTSTART", "OK", 2000);
+  // 2. Start MQTT service and wait for its asynchronous result.
+  if (!startMQTTService())
+  {
+    return false;
+  }
+
+  bool serviceStarted = true;
+  bool clientAcquired = false;
+  bool connected = false;
 
   bool isSSL = (MQTT_PORT == 8883);
 
   if (isSSL)
   {
     // Configure SSL Context 0 for MQTTS connection
-    sendCommand("AT+CSSLCFG=\"sslversion\",0,4", "OK", 2000);       // TLS 1.2
-    sendCommand("AT+CSSLCFG=\"authmode\",0,0", "OK", 2000);         // No server certificate verification
-    sendCommand("AT+CSSLCFG=\"ignorelocaltime\",0,1", "OK", 2000);  // Ignore local time mismatch (handy if RTC is off)
-    sendCommand("AT+CSSLCFG=\"enableSNI\",0,1", "OK", 2000);        // Enable SNI for cloud brokers (like EMQX Cloud)
+    bool sslConfigured =
+      sendCommand("AT+CSSLCFG=\"sslversion\",0,4", "OK", 2000) &&       // TLS 1.2
+      sendCommand("AT+CSSLCFG=\"authmode\",0,0", "OK", 2000) &&         // No server certificate verification
+      sendCommand("AT+CSSLCFG=\"ignorelocaltime\",0,1", "OK", 2000) &&  // Ignore local time mismatch if RTC is off
+      sendCommand("AT+CSSLCFG=\"enableSNI\",0,1", "OK", 2000);          // Required by hosted EMQX endpoints
+
+    if (!sslConfigured)
+    {
+      Serial.println(F("MQTT TLS configuration failed!"));
+      cleanupMQTT(connected, clientAcquired, serviceStarted);
+      return false;
+    }
   }
 
   // 3. Acquire Client (0 is client index, 0 is TCP, 1 is SSL)
@@ -342,13 +470,20 @@ void publishMQTT(String payload)
   if (!waitResponse("OK", 2000))
   {
     Serial.println(F("MQTT acquire client failed!"));
-    return;
+    cleanupMQTT(connected, clientAcquired, serviceStarted);
+    return false;
   }
+  clientAcquired = true;
 
   if (isSSL)
   {
     // Link MQTT client 0 to SSL context 0. Must be done AFTER acquiring client (CMQTTACCQ)
-    sendCommand("AT+CMQTTSSLCFG=0,0", "OK", 2000);
+    if (!sendCommand("AT+CMQTTSSLCFG=0,0", "OK", 2000))
+    {
+      Serial.println(F("MQTT TLS client binding failed!"));
+      cleanupMQTT(connected, clientAcquired, serviceStarted);
+      return false;
+    }
   }
 
   // 4. Connect to Broker (asynchronous, wait for +CMQTTCONNECT: 0,0 success)
@@ -362,9 +497,9 @@ void publishMQTT(String payload)
   simSerial.print(MQTT_PORT);
   simSerial.print(F("\",60,1"));
   
-  String username = String(MQTT_USER);
-  String password = String(MQTT_PASS);
-  if (username != "" && username != "your_mqtt_username")
+  const char* username = MQTT_USER;
+  const char* password = MQTT_PASS;
+  if (username[0] != '\0' && strcmp(username, "your_mqtt_username") != 0)
   {
     simSerial.print(F(",\""));
     simSerial.print(username);
@@ -377,11 +512,10 @@ void publishMQTT(String payload)
   if (!waitResponse("+CMQTTCONNECT: 0,0", 15000))
   {
     Serial.println(F("MQTT connection failed!"));
-    // Clean up acquired client
-    sendCommand("AT+CMQTTRELEASE=0", "OK", 2000);
-    sendCommand("AT+CMQTTSTOP", "OK", 2000);
-    return;
+    cleanupMQTT(connected, clientAcquired, serviceStarted);
+    return false;
   }
+  connected = true;
 
   // 5. Set Topic
   String topic = String(MQTT_TOPIC);
@@ -402,10 +536,8 @@ void publishMQTT(String payload)
   if (!topicInputSuccess)
   {
     Serial.println(F("Failed to set MQTT topic!"));
-    sendCommand("AT+CMQTTDISC=0,120", "+CMQTTDISC: 0,0", 5000);
-    sendCommand("AT+CMQTTRELEASE=0", "OK", 2000);
-    sendCommand("AT+CMQTTSTOP", "OK", 2000);
-    return;
+    cleanupMQTT(connected, clientAcquired, serviceStarted);
+    return false;
   }
 
   // 6. Set Payload
@@ -426,20 +558,22 @@ void publishMQTT(String payload)
   if (!payloadInputSuccess)
   {
     Serial.println(F("Failed to set MQTT payload!"));
-    sendCommand("AT+CMQTTDISC=0,120", "+CMQTTDISC: 0,0", 5000);
-    sendCommand("AT+CMQTTRELEASE=0", "OK", 2000);
-    sendCommand("AT+CMQTTSTOP", "OK", 2000);
-    return;
+    cleanupMQTT(connected, clientAcquired, serviceStarted);
+    return false;
   }
 
   // 7. Publish (asynchronous, wait for +CMQTTPUB: 0,0 success)
-  if (!sendCommand("AT+CMQTTPUB=0,1,60", "+CMQTTPUB: 0,0", 10000))
+  bool published = sendCommand("AT+CMQTTPUB=0,1,60", "+CMQTTPUB: 0,0", 10000);
+  if (!published)
   {
     Serial.println(F("MQTT publish failed!"));
   }
+  else
+  {
+    Serial.println(F("MQTT publish succeeded"));
+  }
 
   // 8. Disconnect and release resources
-  sendCommand("AT+CMQTTDISC=0,120", "+CMQTTDISC: 0,0", 5000);
-  sendCommand("AT+CMQTTRELEASE=0", "OK", 2000);
-  sendCommand("AT+CMQTTSTOP", "OK", 2000);
+  cleanupMQTT(connected, clientAcquired, serviceStarted);
+  return published;
 }
