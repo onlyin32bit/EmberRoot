@@ -41,40 +41,48 @@ Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 SoftwareSerial simSerial(3, 2);
 
 void publishMQTT(String payload);
+bool waitResponse(const char* expected, uint32_t timeoutMs);
 bool sendCommand(const char* cmd, const char* expected, uint32_t timeoutMs);
 bool checkSimInternet();
 
-bool sendCommand(const char* cmd, const char* expected, uint32_t timeoutMs)
+bool waitResponse(const char* expected, uint32_t timeoutMs)
 {
-  // Clear any leftover data in buffer
-  while (simSerial.available() > 0)
-  {
-    simSerial.read();
-  }
-
-  simSerial.println(cmd);
-  
   uint32_t startTime = millis();
-  String response = "";
+  uint16_t matchIndex = 0;
+  uint16_t expectedLen = strlen(expected);
   
   while (millis() - startTime < timeoutMs)
   {
     if (simSerial.available() > 0)
     {
       char c = simSerial.read();
-      response += c;
-      if (response.indexOf(expected) != -1)
+      Serial.write(c); // Print incoming char to console in real-time
+      
+      if (c == expected[matchIndex])
       {
-        return true;
+        matchIndex++;
+        if (matchIndex == expectedLen)
+        {
+          return true;
+        }
+      }
+      else
+      {
+        matchIndex = (c == expected[0]) ? 1 : 0;
       }
     }
   }
-  
-  Serial.print(F("Command "));
-  Serial.print(cmd);
-  Serial.print(F(" failed. Response: "));
-  Serial.println(response);
   return false;
+}
+
+bool sendCommand(const char* cmd, const char* expected, uint32_t timeoutMs)
+{
+  while (simSerial.available() > 0)
+  {
+    simSerial.read();
+  }
+  simSerial.println(cmd);
+  return waitResponse(expected, timeoutMs);
 }
 
 bool checkSimInternet()
@@ -159,20 +167,28 @@ bool checkSimInternet()
   bool netOpen = false;
   for (int i = 0; i < 5; i++)
   {
-    if (sendCommand("AT+NETOPEN?", "+NETOPEN: 1", 2000))
+    // Check if network is already open without causing a scary error log on failure
+    while (simSerial.available() > 0) simSerial.read();
+    simSerial.println(F("AT+NETOPEN?"));
+    if (waitResponse("+NETOPEN: 1", 2000))
     {
       netOpen = true;
       break;
     }
     
+    // Command network open
+    while (simSerial.available() > 0) simSerial.read();
     simSerial.println(F("AT+NETOPEN"));
     uint32_t start = millis();
+    String netResp = "";
     while (millis() - start < 10000)
     {
       if (simSerial.available() > 0)
       {
-        String resp = simSerial.readString();
-        if (resp.indexOf("+NETOPEN: 0") != -1 || resp.indexOf("Network is already opened") != -1)
+        char c = simSerial.read();
+        Serial.write(c);
+        netResp += c;
+        if (netResp.indexOf("+NETOPEN: 0") != -1 || netResp.indexOf("Network is already opened") != -1)
         {
           netOpen = true;
           break;
@@ -267,20 +283,28 @@ void publishMQTT(String payload)
 
   // 1. Ensure Network is open (AT+NETOPEN)
   bool netOpen = false;
-  if (sendCommand("AT+NETOPEN?", "+NETOPEN: 1", 2000))
+  // Check status first without verbose command fail log
+  while (simSerial.available() > 0) simSerial.read();
+  simSerial.println(F("AT+NETOPEN?"));
+  if (waitResponse("+NETOPEN: 1", 2000))
   {
     netOpen = true;
   }
   else
   {
+    // Try to open it
+    while (simSerial.available() > 0) simSerial.read();
     simSerial.println(F("AT+NETOPEN"));
     uint32_t start = millis();
+    String netResp = "";
     while (millis() - start < 10000)
     {
       if (simSerial.available() > 0)
       {
-        String resp = simSerial.readString();
-        if (resp.indexOf("+NETOPEN: 0") != -1 || resp.indexOf("Network is already opened") != -1)
+        char c = simSerial.read();
+        Serial.write(c);
+        netResp += c;
+        if (netResp.indexOf("+NETOPEN: 0") != -1 || netResp.indexOf("Network is already opened") != -1)
         {
           netOpen = true;
           break;
@@ -312,19 +336,47 @@ void publishMQTT(String payload)
   }
 
   // 3. Acquire Client (0 is client index, 0 is TCP, 1 is SSL)
-  String accqCmd = "AT+CMQTTACCQ=0,\"" + String(MQTT_CLIENT_ID) + "\"," + (isSSL ? "1" : "0");
-  sendCommand(accqCmd.c_str(), "OK", 2000);
+  while (simSerial.available() > 0) simSerial.read();
+  simSerial.print(F("AT+CMQTTACCQ=0,\""));
+  simSerial.print(MQTT_CLIENT_ID);
+  simSerial.print(F("\","));
+  simSerial.println(isSSL ? 1 : 0);
+  if (!waitResponse("OK", 2000))
+  {
+    Serial.println(F("MQTT acquire client failed!"));
+    return;
+  }
 
   // 4. Connect to Broker (asynchronous, wait for +CMQTTCONNECT: 0,0 success)
-  String connectCmd = "AT+CMQTTCONNECT=0,\"tcp://" + String(MQTT_BROKER) + ":" + String(MQTT_PORT) + "\",60,1";
+  // We send the parameters piece-by-piece to avoid heap allocations
+  while (simSerial.available() > 0) simSerial.read();
+  simSerial.print(F("AT+CMQTTCONNECT=0,\""));
+  if (isSSL)
+  {
+    simSerial.print(F("ssl://"));
+  }
+  else
+  {
+    simSerial.print(F("tcp://"));
+  }
+  simSerial.print(MQTT_BROKER);
+  simSerial.print(F(":"));
+  simSerial.print(MQTT_PORT);
+  simSerial.print(F("\",60,1"));
+  
   String username = String(MQTT_USER);
   String password = String(MQTT_PASS);
   if (username != "" && username != "your_mqtt_username")
   {
-    connectCmd += ",\"" + username + "\",\"" + password + "\"";
+    simSerial.print(F(",\""));
+    simSerial.print(username);
+    simSerial.print(F("\",\""));
+    simSerial.print(password);
+    simSerial.print(F("\""));
   }
+  simSerial.println();
   
-  if (!sendCommand(connectCmd.c_str(), "+CMQTTCONNECT: 0,0", 15000))
+  if (!waitResponse("+CMQTTCONNECT: 0,0", 15000))
   {
     Serial.println(F("MQTT connection failed!"));
     // Clean up acquired client
@@ -335,27 +387,17 @@ void publishMQTT(String payload)
 
   // 5. Set Topic
   String topic = String(MQTT_TOPIC);
-  String topicCmd = "AT+CMQTTTOPIC=0," + String(topic.length());
+  while (simSerial.available() > 0) simSerial.read();
+  simSerial.print(F("AT+CMQTTTOPIC=0,"));
+  simSerial.println(topic.length());
+  
   bool topicInputSuccess = false;
-  if (sendCommand(topicCmd.c_str(), ">", 2000))
+  if (waitResponse(">", 2000))
   {
     simSerial.print(topic);
-    
-    // Wait for "OK" response confirming the topic input has been accepted
-    uint32_t start = millis();
-    String resp = "";
-    while (millis() - start < 3000)
+    if (waitResponse("OK", 3000))
     {
-      if (simSerial.available() > 0)
-      {
-        char c = simSerial.read();
-        resp += c;
-        if (resp.indexOf("OK") != -1)
-        {
-          topicInputSuccess = true;
-          break;
-        }
-      }
+      topicInputSuccess = true;
     }
   }
 
@@ -369,27 +411,17 @@ void publishMQTT(String payload)
   }
 
   // 6. Set Payload
-  String payloadCmd = "AT+CMQTTPAYLOAD=0," + String(payload.length());
+  while (simSerial.available() > 0) simSerial.read();
+  simSerial.print(F("AT+CMQTTPAYLOAD=0,"));
+  simSerial.println(payload.length());
+  
   bool payloadInputSuccess = false;
-  if (sendCommand(payloadCmd.c_str(), ">", 2000))
+  if (waitResponse(">", 2000))
   {
     simSerial.print(payload);
-    
-    // Wait for "OK" response confirming the payload input has been accepted
-    uint32_t start = millis();
-    String resp = "";
-    while (millis() - start < 3000)
+    if (waitResponse("OK", 3000))
     {
-      if (simSerial.available() > 0)
-      {
-        char c = simSerial.read();
-        resp += c;
-        if (resp.indexOf("OK") != -1)
-        {
-          payloadInputSuccess = true;
-          break;
-        }
-      }
+      payloadInputSuccess = true;
     }
   }
 
