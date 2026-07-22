@@ -295,12 +295,25 @@ void publishMQTT(String payload)
   // 2. Start MQTT service (might return error if already started, which we bypass)
   sendCommand("AT+CMQTTSTART", "OK", 2000);
 
-  // 3. Acquire Client (0 is client index, 0 is TCP server type)
-  String accqCmd = "AT+CMQTTACCQ=0,\"" + String(MQTT_CLIENT_ID) + "\",0";
+  bool isSSL = (MQTT_PORT == 8883);
+
+  if (isSSL)
+  {
+    // Configure SSL Context 0 for MQTTS connection
+    sendCommand("AT+CSSLCFG=\"sslversion\",0,4", "OK", 2000);       // TLS 1.2
+    sendCommand("AT+CSSLCFG=\"authmode\",0,0", "OK", 2000);         // No server certificate verification
+    sendCommand("AT+CSSLCFG=\"ignorelocaltime\",0,1", "OK", 2000);  // Ignore local time mismatch (handy if RTC is off)
+    // Link MQTT client 0 to SSL context 0
+    sendCommand("AT+CMQTTSSLCFG=0,0", "OK", 2000);
+  }
+
+  // 3. Acquire Client (0 is client index, 0 is TCP, 1 is SSL)
+  String accqCmd = "AT+CMQTTACCQ=0,\"" + String(MQTT_CLIENT_ID) + "\"," + (isSSL ? "1" : "0");
   sendCommand(accqCmd.c_str(), "OK", 2000);
 
   // 4. Connect to Broker
-  String connectCmd = "AT+CMQTTCONNECT=0,\"" + String(MQTT_BROKER) + "\",60,1";
+  // SIMCom modules expect "tcp://<broker>:<port>" for AT+CMQTTCONNECT even in SSL mode
+  String connectCmd = "AT+CMQTTCONNECT=0,\"tcp://" + String(MQTT_BROKER) + ":" + String(MQTT_PORT) + "\",60,1";
   String username = String(MQTT_USER);
   String password = String(MQTT_PASS);
   if (username != "" && username != "your_mqtt_username")
@@ -308,7 +321,7 @@ void publishMQTT(String payload)
     connectCmd += ",\"" + username + "\",\"" + password + "\"";
   }
   
-  if (!sendCommand(connectCmd.c_str(), "OK", 10000))
+  if (!sendCommand(connectCmd.c_str(), "OK", 15000))
   {
     Serial.println(F("MQTT connection failed!"));
     // Clean up acquired client
