@@ -1,60 +1,145 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
+	import { api, type ApiAlert, type ApiNode, type ApiTelemetry } from '$lib/api';
 	import PageShell from '$lib/components/PageShell.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { LineAreaChart } from '$lib/components/charts';
-	import { mockService } from '$lib/mock';
 	import { goto } from '$app/navigation';
 	
 	const id = $derived(page.params.id as string);
-	const alert = $derived(mockService.getAlerts().find(a => a.id === id));
-	const incident = $derived(mockService.getIncident(id));
 	
-	// Determine if we're showing an alert or an incident
-	const isIncident = $derived(!!incident);
-	const data: any = $derived(incident || alert);
-	const sensor = $derived(data && data.sensorId ? mockService.getSensor(data.sensorId) : null);
-	const region = $derived(data ? mockService.getRegion(data.regionId) : null);
-	
-	const telemetry = $derived(sensor ? mockService.getTelemetry(sensor.id) : null);
-	const tempSeries = $derived(telemetry?.history.temperature ?? []);
-	const moistureSeries = $derived(telemetry?.history.soilMoisture ?? []);
-	const batterySeries = $derived(telemetry?.history.batteryPct ?? []);
-	const co2Series = $derived(telemetry?.history.co2Ppm ?? []);
-	const smokeSeries = $derived(telemetry?.history.smokeIndex ?? []);
-	const windSeries = $derived(telemetry?.history.windSpeed ?? []);
-	const confidence = $derived(sensor ? mockService.getConfidenceScore(sensor.id) : null);
+	let alert = $state<ApiAlert | null>(null);
+	let node = $state<ApiNode | null>(null);
+	let telemetry = $state<ApiTelemetry[]>([]);
+	let loading = $state(true);
+	let error = $state<string | null>(null);
 
-	function getSeverityBadge(severity: string) {
-		switch (severity) {
-			case 'critical': return 'critical';
-			case 'high': return 'ember';
-			case 'medium': return 'warning';
+	const chartData = $derived.by(() => {
+		if (telemetry.length === 0) {
+			return { co: [], co2: [], temp: [], moisture: [] };
+		}
+
+		// Sort by timestamp ascending for chart display
+		const sorted = [...telemetry].reverse();
+
+		return {
+			co: sorted.map(t => ({ 
+				timestamp: new Date(t.received_at).getTime(), 
+				value: t.co ?? 0 
+			})),
+			co2: sorted.map(t => ({ 
+				timestamp: new Date(t.received_at).getTime(), 
+				value: t.co2 ?? 0 
+			})),
+			temp: sorted.map(t => ({ 
+				timestamp: new Date(t.received_at).getTime(), 
+				value: t.temp_5 ?? 0 
+			})),
+			moisture: sorted.map(t => ({ 
+				timestamp: new Date(t.received_at).getTime(), 
+				value: t.moisture ?? 0 
+			}))
+		};
+	});
+
+	const gasChartSeries = $derived([
+		{ id: 'co', label: 'CO (ppm)', data: chartData.co, color: 'var(--status-warning)' },
+		{ id: 'co2', label: 'CO2 (ppm)', data: chartData.co2, color: 'var(--status-critical)', filled: false }
+	]);
+
+	const tempChartSeries = $derived([
+		{ id: 'temp', label: 'Temperature (°C)', data: chartData.temp, color: 'var(--ember-400)' }
+	]);
+
+	function getLevelBadgeVariant(level: string) {
+		switch (level) {
+			case 'warning': return 'critical';
+			case 'suspicious': return 'warning';
+			case 'monitoring': return 'online';
 			default: return 'neutral';
 		}
 	}
-	
-	function formatDate(timestamp: number) {
-		return new Date(timestamp).toLocaleString();
+
+	function getStateBadgeVariant(state: string) {
+		switch (state) {
+			case 'open': return 'warning';
+			case 'acknowledged': return 'neutral';
+			case 'resolved': return 'online';
+			default: return 'neutral';
+		}
 	}
+
+	async function loadAlertDetails() {
+		try {
+			loading = true;
+			const allAlerts = await api.getAlerts();
+			const foundAlert = allAlerts.find(a => a.id === id);
+			
+			if (!foundAlert) {
+				error = 'Alert not found';
+				return;
+			}
+
+			alert = foundAlert;
+
+			// Load node details
+			const nodeData = await api.getNode(foundAlert.node_id);
+			node = nodeData;
+
+			// Load recent telemetry for this node
+			const telemetryData = await api.getTelemetry(foundAlert.node_id, { limit: 100 });
+			telemetry = telemetryData;
+
+			error = null;
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to load alert details';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function acknowledgeAlert() {
+		if (!alert) return;
+		try {
+			await api.acknowledgeAlert(alert.id);
+			await loadAlertDetails();
+		} catch (err) {
+			console.error('Failed to acknowledge alert:', err);
+		}
+	}
+
+	onMount(() => {
+		void loadAlertDetails();
+	});
 </script>
 
 <svelte:head>
-	<title>Details: {id} — EmberRoot</title>
+	<title>Alert: {id} — EmberRoot</title>
 </svelte:head>
 
 <PageShell
-	title={isIncident ? 'Incident Command View' : 'Alert Details'}
-	subtitle={`Details for ${id}`}
-	breadcrumb={['EmberRoot', 'Operations', isIncident ? 'Incidents' : 'Alerts', id]}
+	title={alert ? `Alert: ${alert.level.toUpperCase()}` : 'Alert'}
+	subtitle={alert?.node_name || alert?.node_id || 'Loading...'}
+	breadcrumb={['EmberRoot', 'Alerts', id]}
 >
-	{#if !data}
+	{#if error}
 		<Card padding="lg" class="error-card">
-			<h3>Record not found</h3>
-			<p>No alert or incident exists with ID {id}.</p>
-			<Button variant="secondary" onclick={() => window.history.back()}>Go Back</Button>
+			<h3>Error</h3>
+			<p>{error}</p>
+			<Button variant="secondary" onclick={() => void loadAlertDetails()}>Retry</Button>
+		</Card>
+	{:else if loading}
+		<Card padding="lg">
+			<p>Loading alert details...</p>
+		</Card>
+	{:else if !alert}
+		<Card padding="lg" class="error-card">
+			<h3>Alert not found</h3>
+			<p>No alert with ID {id} was found.</p>
+			<Button variant="secondary" onclick={() => void goto('/alerts')}>Back to Alerts</Button>
 		</Card>
 	{:else}
 		<div class="details-grid">
@@ -62,83 +147,84 @@
 				<!-- Header Card -->
 				<Card padding="lg" class="header-card">
 					<div class="header-top">
-						<Badge variant={getSeverityBadge(data.severity)}>{data.severity}</Badge>
-						<Badge variant="neutral">{data.status ?? (data.resolvedAt ? 'resolved' : 'active')}</Badge>
-						{#if isIncident}
-							<span class="type-tag">{data.type}</span>
-						{/if}
+						<Badge variant={getLevelBadgeVariant(alert.level)}>{alert.level}</Badge>
+						<Badge variant={getStateBadgeVariant(alert.state)}>{alert.state}</Badge>
 					</div>
-					<h2 class="title">{data.title}</h2>
-					<p class="description">{data.message || data.description}</p>
+					<h2 class="title">Alert #{alert.id}</h2>
+					<p class="description">{alert.explanation}</p>
 					
 					<div class="meta-grid">
 						<div class="meta-item">
-							<span class="meta-label">Timestamp</span>
-							<span class="meta-value">{formatDate(data.triggeredAt || data.reportedAt)}</span>
+							<span class="meta-label">Created</span>
+							<span class="meta-value">{new Date(alert.created_at).toLocaleString()}</span>
 						</div>
 						<div class="meta-item">
-							<span class="meta-label">Region</span>
-							<span class="meta-value">{region?.name ?? data.regionId}</span>
+							<span class="meta-label">Level</span>
+							<span class="meta-value">{alert.level}</span>
 						</div>
 						<div class="meta-item">
-							<span class="meta-label">GPS Location</span>
-							<span class="meta-value font-mono">{data.location?.lat.toFixed(4) || data.origin?.lat.toFixed(4)}, {data.location?.lon.toFixed(4) || data.origin?.lon.toFixed(4)}</span>
+							<span class="meta-label">State</span>
+							<span class="meta-value">{alert.state}</span>
 						</div>
-						{#if confidence}
+						{#if alert.acknowledged_at}
 							<div class="meta-item">
-								<span class="meta-label">AI Confidence Score</span>
-								<span class="meta-value text-ember">{confidence.score}%</span>
+								<span class="meta-label">Acknowledged</span>
+								<span class="meta-value">{new Date(alert.acknowledged_at).toLocaleString()}</span>
 							</div>
 						{/if}
 					</div>
 				</Card>
 				
-				<!-- Sensor Trends -->
-				{#if sensor && telemetry}
+				<!-- Telemetry Charts -->
+				{#if telemetry.length > 0}
 					<Card padding="lg" class="chart-card">
-						<h3>Sensor Readings & Historical Trends</h3>
-						<p class="subtitle">Data from node <a href={`/spatial-map/node/${sensor.id}`}>{sensor.id}</a></p>
+						<h3>Telemetry History</h3>
+						<p class="subtitle">Last 100 readings from node {alert.node_id}</p>
 						
-						<div class="chart-wrapper">
-							{#if data.category === 'battery_low'}
-								<LineAreaChart series={[{ id: 'batt', label: 'Battery (%)', data: batterySeries, color: 'var(--status-warning)' }]} unit="" height={250} />
-							{:else if data.category === 'co2_threshold'}
-								<LineAreaChart series={[{ id: 'co2', label: 'CO2 (ppm)', data: co2Series, color: 'var(--status-critical)' }]} unit="" height={250} />
-							{:else if data.category === 'smoke_detected'}
-								<LineAreaChart series={[{ id: 'smoke', label: 'Smoke Index', data: smokeSeries, color: 'var(--text-primary)' }]} unit="" height={250} />
-							{:else if data.category === 'wind_shift'}
-								<LineAreaChart series={[{ id: 'wind', label: 'Wind Speed (kph)', data: windSeries, color: 'var(--status-online)' }]} unit="" height={250} />
-							{:else}
-								<LineAreaChart 
-									series={[
-										{ id: 'temp', label: 'Temperature (°C)', data: tempSeries, color: 'var(--ember-400)' },
-										{ id: 'moisture', label: 'Soil Moisture (%)', data: moistureSeries, color: 'var(--status-online)', filled: false }
-									]} 
-									unit="" 
-									height={250} 
-								/>
-							{/if}
+						<div class="charts-container">
+							<div class="chart-wrapper">
+								<h4>Temperature</h4>
+								<LineAreaChart series={tempChartSeries} unit="°C" height={220} />
+							</div>
+							<div class="chart-wrapper">
+								<h4>Gas Levels</h4>
+								<LineAreaChart series={gasChartSeries} unit="ppm" height={220} />
+							</div>
 						</div>
 					</Card>
-				{/if}
 
-				<!-- Incident Timeline -->
-				{#if isIncident && data.updates}
-					<Card padding="lg" class="timeline-card">
-						<h3>Response History</h3>
-						<div class="timeline">
-							{#each data.updates as update}
-								<div class="timeline-item">
-									<div class="timeline-dot"></div>
-									<div class="timeline-content">
-										<div class="timeline-meta">
-											<strong>{update.authorId}</strong>
-											<span>{formatDate(update.timestamp)}</span>
-										</div>
-										<p>{update.message}</p>
-									</div>
+					<!-- Summary Statistics -->
+					<Card padding="lg" class="stats-card">
+						<h3>Telemetry Summary</h3>
+						<div class="stats-grid">
+							{#if telemetry.some(t => t.co !== null)}
+								<div class="stat">
+									<div class="stat-label">Avg CO</div>
+									<div class="stat-value">{(telemetry.reduce((s, t) => s + (t.co ?? 0), 0) / telemetry.filter(t => t.co !== null).length).toFixed(2)}</div>
+									<div class="stat-unit">ppm</div>
 								</div>
-							{/each}
+							{/if}
+							{#if telemetry.some(t => t.co2 !== null)}
+								<div class="stat">
+									<div class="stat-label">Avg CO2</div>
+									<div class="stat-value">{(telemetry.reduce((s, t) => s + (t.co2 ?? 0), 0) / telemetry.filter(t => t.co2 !== null).length).toFixed(0)}</div>
+									<div class="stat-unit">ppm</div>
+								</div>
+							{/if}
+							{#if telemetry.some(t => t.temp_5 !== null)}
+								<div class="stat">
+									<div class="stat-label">Avg Temp</div>
+									<div class="stat-value">{(telemetry.reduce((s, t) => s + (t.temp_5 ?? 0), 0) / telemetry.filter(t => t.temp_5 !== null).length).toFixed(1)}</div>
+									<div class="stat-unit">°C</div>
+								</div>
+							{/if}
+							{#if telemetry.some(t => t.moisture !== null)}
+								<div class="stat">
+									<div class="stat-label">Avg Moisture</div>
+									<div class="stat-value">{(telemetry.reduce((s, t) => s + (t.moisture ?? 0), 0) / telemetry.filter(t => t.moisture !== null).length).toFixed(0)}</div>
+									<div class="stat-unit">%</div>
+								</div>
+							{/if}
 						</div>
 					</Card>
 				{/if}
@@ -147,45 +233,64 @@
 			<div class="side-column">
 				<!-- Quick Actions -->
 				<Card padding="md" class="actions-card">
-					<h3>Quick Actions</h3>
+					<h3>Actions</h3>
 					<div class="action-buttons">
-						<Button variant="primary" class="w-full">Acknowledge</Button>
-						<Button variant="secondary" class="w-full">Dispatch Ranger</Button>
-						{#if sensor}
-							<Button variant="ghost" class="w-full" onclick={() => goto(`/spatial-map/node/${sensor.id}`)}>View Node on Map</Button>
+						{#if alert.state === 'open'}
+							<Button 
+								variant="primary" 
+								class="w-full"
+								onclick={() => void acknowledgeAlert()}
+							>
+								Acknowledge Alert
+							</Button>
+						{:else}
+							<Button 
+								variant="secondary" 
+								class="w-full"
+								disabled
+							>
+								{alert.state === 'acknowledged' ? 'Alert Acknowledged' : 'Alert Resolved'}
+							</Button>
 						{/if}
+						<Button variant="ghost" class="w-full" onclick={() => void goto('/alerts')}>
+							Back to Alerts
+						</Button>
 					</div>
 				</Card>
 				
-				<!-- Sensor Info -->
-				{#if sensor}
-					<Card padding="md" class="sensor-info-card">
-						<h3>Associated Node</h3>
+				<!-- Node Info -->
+				{#if node}
+					<Card padding="md" class="node-info-card">
+						<h3>Node Details</h3>
 						<div class="meta-grid vertical">
 							<div class="meta-item">
 								<span class="meta-label">Node ID</span>
-								<span class="meta-value">{sensor.id}</span>
+								<span class="meta-value">{node.id}</span>
+							</div>
+							<div class="meta-item">
+								<span class="meta-label">Node Type</span>
+								<span class="meta-value">{node.node_type}</span>
 							</div>
 							<div class="meta-item">
 								<span class="meta-label">Status</span>
-								<span class="meta-value"><Badge variant={sensor.status === 'online' ? 'online' : 'warning'}>{sensor.status}</Badge></span>
+								<span class="meta-value">
+									<Badge variant={node.status === 'online' ? 'online' : node.status === 'critical' ? 'critical' : 'warning'}>
+										{node.status}
+									</Badge>
+								</span>
 							</div>
-							<div class="meta-item">
-								<span class="meta-label">Battery</span>
-								<span class="meta-value">{sensor.batteryPct}%</span>
-							</div>
-						</div>
-					</Card>
-				{/if}
-				
-				<!-- Hotspot Info -->
-				{#if region}
-					<Card padding="md" class="hotspot-card">
-						<h3>Satellite Hotspot</h3>
-						<p class="subtitle">NASA FIRMS integration</p>
-						<p class="info-text">Checking for correlated thermal anomalies in {region.name} near the event origin.</p>
-						<div class="hotspot-status">
-							<Badge variant="ember">Hotspot Detected</Badge>
+							{#if node.battery_pct !== null}
+								<div class="meta-item">
+									<span class="meta-label">Battery</span>
+									<span class="meta-value">{node.battery_pct}%</span>
+								</div>
+							{/if}
+							{#if node.last_seen_at}
+								<div class="meta-item">
+									<span class="meta-label">Last Seen</span>
+									<span class="meta-value">{new Date(node.last_seen_at).toLocaleString()}</span>
+								</div>
+							{/if}
 						</div>
 					</Card>
 				{/if}
@@ -197,9 +302,9 @@
 <style>
 	.details-grid {
 		display: grid;
-		grid-template-columns: 1fr 320px;
+		grid-template-columns: 1fr 300px;
 		gap: 20px;
-		margin-top: 20px;
+		padding: 24px 28px;
 	}
 	@media (max-width: 900px) {
 		.details-grid {
@@ -235,7 +340,7 @@
 	
 	.meta-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 		gap: 16px;
 		padding-top: 16px;
 		border-top: 1px solid var(--surface-border);
@@ -247,6 +352,132 @@
 		border-top: none;
 		gap: 12px;
 	}
+
+	.meta-item {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.meta-label {
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--text-muted);
+	}
+
+	.meta-value {
+		font-size: 12px;
+		color: var(--text-primary);
+	}
+
+	.chart-card {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.chart-card h3 {
+		margin: 0;
+		font-size: 14px;
+	}
+
+	.subtitle {
+		font-size: 12px;
+		color: var(--text-muted);
+		margin: 0 0 12px 0;
+	}
+
+	.charts-container {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+		gap: 16px;
+	}
+
+	.chart-wrapper {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.chart-wrapper h4 {
+		margin: 0;
+		font-size: 12px;
+		color: var(--text-secondary);
+	}
+
+	.stats-card {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.stats-card h3 {
+		margin: 0;
+		font-size: 14px;
+	}
+
+	.stats-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+		gap: 12px;
+	}
+
+	.stat {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 4px;
+		padding: 12px;
+		border-radius: 8px;
+		background: rgba(255, 255, 255, 0.02);
+		border: 1px solid rgba(255, 255, 255, 0.05);
+	}
+
+	.stat-label {
+		font-size: 10px;
+		text-transform: uppercase;
+		color: var(--text-muted);
+		letter-spacing: 0.05em;
+	}
+
+	.stat-value {
+		font-size: 18px;
+		font-weight: 700;
+		color: var(--text-primary);
+	}
+
+	.stat-unit {
+		font-size: 10px;
+		color: var(--text-secondary);
+	}
+
+	.action-buttons {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.w-full {
+		width: 100%;
+	}
+
+	.error-card {
+		border-color: var(--status-critical);
+		background: color-mix(in srgb, var(--status-critical) 5%, transparent);
+	}
+
+	.error-card h3 {
+		color: var(--status-critical);
+		margin-top: 0;
+	}
+
+	.node-info-card h3 {
+		margin: 0 0 12px 0;
+		font-size: 12px;
+	}
+</style>
+
 	
 	.meta-item {
 		display: flex;

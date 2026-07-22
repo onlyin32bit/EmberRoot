@@ -1,7 +1,8 @@
 import type { ApiAlert, ApiEnvelope, ApiNode, ApiRegion, ApiTelemetry, AuthSession, RealtimeEvent } from './types';
+import { PUBLIC_API_BASE_URL } from '$env/static/public';
 
 const TOKEN_KEY = 'emberroot.admin-token';
-const API_BASE_URL = (import.meta.env.PUBLIC_API_BASE_URL as string | undefined)?.replace(/\/$/u, '') || 'http://localhost:8787';
+const API_BASE_URL = PUBLIC_API_BASE_URL?.replace(/\/$/u, '') || 'http://localhost:8787';
 
 export class EmberRootApiClient {
 	private token: string | null = typeof localStorage === 'undefined' ? null : localStorage.getItem(TOKEN_KEY);
@@ -31,16 +32,38 @@ export class EmberRootApiClient {
 		localStorage.removeItem(TOKEN_KEY);
 	}
 
+	// Regions
 	getRegions(): Promise<ApiRegion[]> { return this.request('/api/regions'); }
+	getRegion(id: string): Promise<ApiRegion & { nodes: ApiNode[] }> {
+		return this.request(`/api/regions/${encodeURIComponent(id)}`);
+	}
+
+	// Nodes
 	getNodes(regionId?: string): Promise<ApiNode[]> {
 		return this.request(`/api/nodes${regionId ? `?regionId=${encodeURIComponent(regionId)}` : ''}`);
 	}
-	getNode(id: string): Promise<ApiNode> { return this.request(`/api/nodes/${encodeURIComponent(id)}`); }
-	getTelemetry(id: string, limit = 100): Promise<ApiTelemetry[]> {
-		return this.request(`/api/nodes/${encodeURIComponent(id)}/telemetry?limit=${limit}`);
+	getNode(id: string): Promise<ApiNode> {
+		return this.request(`/api/nodes/${encodeURIComponent(id)}`);
 	}
-	getAlerts(state?: ApiAlert['state']): Promise<ApiAlert[]> {
-		return this.request(`/api/alerts${state ? `?state=${encodeURIComponent(state)}` : ''}`);
+
+	// Telemetry
+	getTelemetry(nodeId: string, options?: { limit?: number; from?: string; to?: string }): Promise<ApiTelemetry[]> {
+		const params = new URLSearchParams();
+		if (options?.limit) params.set('limit', String(options.limit));
+		if (options?.from) params.set('from', options.from);
+		if (options?.to) params.set('to', options.to);
+		const query = params.toString() ? `?${params.toString()}` : '';
+		return this.request(`/api/nodes/${encodeURIComponent(nodeId)}/telemetry${query}`);
+	}
+
+	// Alerts
+	getAlerts(options?: { state?: ApiAlert['state']; nodeId?: string; limit?: number }): Promise<ApiAlert[]> {
+		const params = new URLSearchParams();
+		if (options?.state) params.set('state', options.state);
+		if (options?.nodeId) params.set('nodeId', options.nodeId);
+		if (options?.limit) params.set('limit', String(options.limit));
+		const query = params.toString() ? `?${params.toString()}` : '';
+		return this.request(`/api/alerts${query}`);
 	}
 	acknowledgeAlert(id: string): Promise<{ id: string; state: string }> {
 		return this.request(`/api/alerts/${encodeURIComponent(id)}/acknowledge`, { method: 'POST' });

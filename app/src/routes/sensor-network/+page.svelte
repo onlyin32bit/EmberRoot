@@ -1,153 +1,627 @@
 <script lang="ts">
-	import { mockService, type SensorNode, type NodeHealth } from '$lib/mock';
+	import { onMount } from 'svelte';
+	import { api, type ApiNode, type ApiRegion } from '$lib/api';
 	import PageShell from '$lib/components/PageShell.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
-	import StatusIndicator from '$lib/components/ui/StatusIndicator.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
-	import ProgressBar from '$lib/components/ui/ProgressBar.svelte';
 	import SearchBar from '$lib/components/ui/SearchBar.svelte';
 	import SideDrawer from '$lib/components/ui/SideDrawer.svelte';
 
-	// Load centralized mock dataset
-	const allSensors = mockService.getSensors();
-	const regions = mockService.getRegions();
-	const regionMap = new Map(regions.map((r) => [r.id, r.name]));
-
-	interface SensorHealthRow {
-		sensor: SensorNode;
-		health: NodeHealth;
-		regionName: string;
-	}
-
-	// Combine SensorNode with NodeHealth data
-	const nodeData: SensorHealthRow[] = allSensors.map((sensor) => {
-		const health = mockService.getNodeHealth(sensor.id) ?? {
-			sensorId: sensor.id,
-			batteryPct: sensor.batteryPct,
-			firmwareVersion: sensor.firmwareVersion,
-			calibrationStatus: 'Calibrated',
-			signalStrength: sensor.signalStrength,
-			sensorDrift: 0.05,
-			maintenanceRecommendation: 'Routine inspection',
-			lastSeenAt: sensor.lastSeenAt
-		};
-		return {
-			sensor,
-			health,
-			regionName: regionMap.get(sensor.regionId) ?? sensor.regionId
-		};
-	});
+	let allNodes = $state<ApiNode[]>([]);
+	let allRegions = $state<ApiRegion[]>([]);
+	let loading = $state(true);
+	let error = $state<string | null>(null);
 
 	// Reactive States
 	let searchQuery = $state('');
-	let driftThreshold = $state(0.12);
 	let regionFilter = $state('all');
-	let statusFilter = $state<'all' | 'high-drift' | 'uncalibrated' | 'low-battery' | 'offline'>('all');
-	let sortBy = $state<'id' | 'batteryPct' | 'signalStrength' | 'sensorDrift' | 'lastSeenAt' | 'status' | 'calibrationStatus'>('sensorDrift');
-	let sortDirection = $state<'asc' | 'desc'>('desc');
+	let statusFilter = $state<'all' | 'online' | 'offline' | 'warning' | 'critical'>('all');
+	let sortBy = $state<'id' | 'status' | 'battery' | 'signal' | 'lastSeen'>('id');
+	let sortDirection = $state<'asc' | 'desc'>('asc');
 
-	let selectedRow = $state<SensorHealthRow | null>(null);
+	let selectedNode = $state<ApiNode | null>(null);
 	let drawerOpen = $state(false);
-	let toastMessage = $state<string | null>(null);
-	let toastTimeout: ReturnType<typeof setTimeout> | null = null;
 
-	function triggerToast(msg: string) {
-		if (toastTimeout) clearTimeout(toastTimeout);
-		toastMessage = msg;
-		toastTimeout = setTimeout(() => {
-			toastMessage = null;
-		}, 3500);
-	}
+	const regionMap = $derived.by(() => {
+		const map = new Map<string, string>();
+		allRegions.forEach(r => map.set(r.id, r.name));
+		return map;
+	});
 
-	// Derived metrics lists for quick-access panels & summary stats
-	const totalNodes = nodeData.length;
-	const batteryNeededList = $derived(nodeData.filter((d) => d.health.batteryPct < 20));
-	const uncalibratedList = $derived(nodeData.filter((d) => d.health.calibrationStatus !== 'Calibrated'));
-	const offlineList = $derived(nodeData.filter((d) => d.sensor.status === 'offline'));
-	const highDriftList = $derived(nodeData.filter((d) => d.health.sensorDrift > driftThreshold));
+	const filteredRows = $derived.by(() => {
+		let results = allNodes;
 
-	// Filtered and sorted table view
-	const filteredRows = $derived(
-		nodeData
-			.filter((item) => {
-				// Text search
-				if (searchQuery.trim()) {
-					const q = searchQuery.toLowerCase();
-					const matches =
-						item.sensor.id.toLowerCase().includes(q) ||
-						item.sensor.name.toLowerCase().includes(q) ||
-						item.sensor.type.toLowerCase().includes(q) ||
-						item.regionName.toLowerCase().includes(q) ||
-						item.health.calibrationStatus.toLowerCase().includes(q);
-					if (!matches) return false;
-				}
+		// Text search
+		if (searchQuery.trim()) {
+			const q = searchQuery.toLowerCase();
+			results = results.filter(n =>
+				n.id.toLowerCase().includes(q) ||
+				n.name.toLowerCase().includes(q) ||
+				(regionMap.get(n.region_id) ?? '').toLowerCase().includes(q)
+			);
+		}
 
-				// Region filter
-				if (regionFilter !== 'all' && item.sensor.regionId !== regionFilter) {
-					return false;
-				}
+		// Region filter
+		if (regionFilter !== 'all') {
+			results = results.filter(n => n.region_id === regionFilter);
+		}
 
-				// Category issue filter
-				if (statusFilter === 'offline' && item.sensor.status !== 'offline') return false;
-				if (statusFilter === 'uncalibrated' && item.health.calibrationStatus === 'Calibrated') return false;
-				if (statusFilter === 'low-battery' && item.health.batteryPct >= 20) return false;
-				if (statusFilter === 'high-drift' && item.health.sensorDrift <= driftThreshold) return false;
+		// Status filter
+		if (statusFilter !== 'all') {
+			results = results.filter(n => n.status === statusFilter);
+		}
 
-				return true;
-			})
-			.sort((a, b) => {
-				let valA: string | number = '';
-				let valB: string | number = '';
+		// Sort
+		results.sort((a, b) => {
+			let valA: string | number = '';
+			let valB: string | number = '';
 
-				if (sortBy === 'id') {
-					valA = a.sensor.id;
-					valB = b.sensor.id;
-				} else if (sortBy === 'batteryPct') {
-					valA = a.health.batteryPct;
-					valB = b.health.batteryPct;
-				} else if (sortBy === 'signalStrength') {
-					valA = a.health.signalStrength;
-					valB = b.health.signalStrength;
-				} else if (sortBy === 'sensorDrift') {
-					valA = a.health.sensorDrift;
-					valB = b.health.sensorDrift;
-				} else if (sortBy === 'lastSeenAt') {
-					valA = a.health.lastSeenAt;
-					valB = b.health.lastSeenAt;
-				} else if (sortBy === 'status') {
-					valA = a.sensor.status;
-					valB = b.sensor.status;
-				} else if (sortBy === 'calibrationStatus') {
-					valA = a.health.calibrationStatus;
-					valB = b.health.calibrationStatus;
-				}
+			if (sortBy === 'id') {
+				valA = a.id;
+				valB = b.id;
+			} else if (sortBy === 'status') {
+				valA = a.status;
+				valB = b.status;
+			} else if (sortBy === 'battery') {
+				valA = a.battery_pct ?? -1;
+				valB = b.battery_pct ?? -1;
+			} else if (sortBy === 'signal') {
+				valA = a.signal_rssi ?? -999;
+				valB = b.signal_rssi ?? -999;
+			} else if (sortBy === 'lastSeen') {
+				valA = a.last_seen_at ?? '';
+				valB = b.last_seen_at ?? '';
+			}
 
-				if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
-				if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
-				return 0;
-			})
-	);
+			if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+			if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+			return 0;
+		});
+
+		return results;
+	});
+
+	const statusCounts = $derived.by(() => ({
+		online: allNodes.filter(n => n.status === 'online').length,
+		offline: allNodes.filter(n => n.status === 'offline').length,
+		warning: allNodes.filter(n => n.status === 'warning').length,
+		critical: allNodes.filter(n => n.status === 'critical').length,
+	}));
 
 	function setSort(col: typeof sortBy) {
 		if (sortBy === col) {
 			sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
 		} else {
 			sortBy = col;
-			sortDirection = 'desc';
+			sortDirection = 'asc';
 		}
 	}
 
-	function inspectNode(row: SensorHealthRow) {
-		selectedRow = row;
+	function getStatusBadgeVariant(status: string) {
+		switch (status) {
+			case 'online': return 'online';
+			case 'offline': return 'neutral';
+			case 'warning': return 'warning';
+			case 'critical': return 'critical';
+			default: return 'neutral';
+		}
+	}
+
+	function inspectNode(node: ApiNode) {
+		selectedNode = node;
 		drawerOpen = true;
 	}
 
-	function formatLastSeen(timestamp: number): string {
-		const diffMs = Date.now() - timestamp;
+	function formatLastSeen(isoString: string | null): string {
+		if (!isoString) return 'Never';
+		const date = new Date(isoString);
+		const diffMs = Date.now() - date.getTime();
 		const diffMin = Math.floor(diffMs / 60000);
+		const diffHours = Math.floor(diffMin / 60);
+		const diffDays = Math.floor(diffHours / 24);
+
 		if (diffMin < 1) return 'Just now';
 		if (diffMin < 60) return `${diffMin}m ago`;
+		if (diffHours < 24) return `${diffHours}h ago`;
+		return `${diffDays}d ago`;
+	}
+
+	async function loadData() {
+		try {
+			loading = true;
+			const [nodes, regions] = await Promise.all([api.getNodes(), api.getRegions()]);
+			allNodes = nodes;
+			allRegions = regions;
+			error = null;
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to load nodes';
+		} finally {
+			loading = false;
+		}
+	}
+
+	onMount(() => {
+		void loadData();
+		const poll = window.setInterval(() => void loadData(), 30_000);
+		return () => window.clearInterval(poll);
+	});
+</script>
+
+<svelte:head>
+	<title>Sensor Network — EmberRoot</title>
+	<meta name="description" content="EmberRoot sensor network — view and manage all nodes in your monitoring network." />
+</svelte:head>
+
+<PageShell title="Sensor Network" subtitle="View and manage all nodes in your monitoring network">
+	<div class="network-page">
+		{#if error}
+			<Card padding="lg" class="error-card">
+				<h3>Error Loading Nodes</h3>
+				<p>{error}</p>
+				<Button variant="primary" onclick={() => void loadData()}>Retry</Button>
+			</Card>
+		{/if}
+
+		<div class="filters-section">
+			<SearchBar placeholder="Search by node ID, name, or region..." bind:value={searchQuery} />
+
+			<div class="filter-controls">
+				<div class="filter-group">
+					<label>Status</label>
+					<div class="filter-buttons">
+						<button class:active={statusFilter === 'all'} onclick={() => statusFilter = 'all'}>
+							All ({allNodes.length})
+						</button>
+						<button class:active={statusFilter === 'online'} onclick={() => statusFilter = 'online'}>
+							Online ({statusCounts.online})
+						</button>
+						<button class:active={statusFilter === 'offline'} onclick={() => statusFilter = 'offline'}>
+							Offline ({statusCounts.offline})
+						</button>
+						<button class:active={statusFilter === 'warning'} onclick={() => statusFilter = 'warning'}>
+							Warning ({statusCounts.warning})
+						</button>
+						<button class:active={statusFilter === 'critical'} onclick={() => statusFilter = 'critical'}>
+							Critical ({statusCounts.critical})
+						</button>
+					</div>
+				</div>
+
+				{#if allRegions.length > 0}
+					<div class="filter-group">
+						<label>Region</label>
+						<select bind:value={regionFilter}>
+							<option value="all">All Regions</option>
+							{#each allRegions as region}
+								<option value={region.id}>{region.name}</option>
+							{/each}
+						</select>
+					</div>
+				{/if}
+			</div>
+		</div>
+
+		<div class="table-section">
+			{#if loading}
+				<Card padding="lg">
+					<p>Loading nodes...</p>
+				</Card>
+			{:else if filteredRows.length === 0}
+				<Card padding="lg" class="empty-state">
+					<p>No nodes match your filters.</p>
+				</Card>
+			{:else}
+				<div class="table-wrapper">
+					<table class="nodes-table">
+						<thead>
+							<tr>
+								<th class="clickable" onclick={() => setSort('id')}>
+									Node ID
+									{#if sortBy === 'id'}
+										<span class="sort-indicator">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+									{/if}
+								</th>
+								<th>Name</th>
+								<th>Region</th>
+								<th>Type</th>
+								<th class="clickable" onclick={() => setSort('status')}>
+									Status
+									{#if sortBy === 'status'}
+										<span class="sort-indicator">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+									{/if}
+								</th>
+								<th class="clickable" onclick={() => setSort('battery')}>
+									Battery
+									{#if sortBy === 'battery'}
+										<span class="sort-indicator">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+									{/if}
+								</th>
+								<th class="clickable" onclick={() => setSort('signal')}>
+									Signal
+									{#if sortBy === 'signal'}
+										<span class="sort-indicator">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+									{/if}
+								</th>
+								<th class="clickable" onclick={() => setSort('lastSeen')}>
+									Last Seen
+									{#if sortBy === 'lastSeen'}
+										<span class="sort-indicator">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+									{/if}
+								</th>
+								<th>Actions</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each filteredRows as node (node.id)}
+								<tr>
+									<td class="monospace">{node.id}</td>
+									<td>{node.name}</td>
+									<td>{regionMap.get(node.region_id) ?? node.region_id}</td>
+									<td>
+										<Badge variant="neutral">{node.node_type}</Badge>
+									</td>
+									<td>
+										<Badge variant={getStatusBadgeVariant(node.status)}>{node.status}</Badge>
+									</td>
+									<td class="numeric">
+										{#if node.battery_pct !== null}
+											{node.battery_pct.toFixed(0)}%
+										{:else}
+											—
+										{/if}
+									</td>
+									<td class="numeric">
+										{#if node.signal_rssi !== null}
+											{node.signal_rssi.toFixed(0)} dBm
+										{:else}
+											—
+										{/if}
+									</td>
+									<td>{formatLastSeen(node.last_seen_at)}</td>
+									<td class="actions">
+										<Button 
+											variant="ghost" 
+											size="small"
+											onclick={() => inspectNode(node)}
+										>
+											Details
+										</Button>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+		</div>
+	</div>
+
+	{#if selectedNode}
+		<SideDrawer bind:open={drawerOpen} title={`Node: ${selectedNode.name}`}>
+			<div class="drawer-content">
+				<Card padding="md" class="drawer-card">
+					<h3>Node Information</h3>
+					<div class="info-grid">
+						<div class="info-item">
+							<span class="label">ID</span>
+							<code>{selectedNode.id}</code>
+						</div>
+						<div class="info-item">
+							<span class="label">Name</span>
+							<span>{selectedNode.name}</span>
+						</div>
+						<div class="info-item">
+							<span class="label">Type</span>
+							<Badge variant="neutral">{selectedNode.node_type}</Badge>
+						</div>
+						<div class="info-item">
+							<span class="label">Region</span>
+							<span>{regionMap.get(selectedNode.region_id) ?? selectedNode.region_id}</span>
+						</div>
+						<div class="info-item">
+							<span class="label">Status</span>
+							<Badge variant={getStatusBadgeVariant(selectedNode.status)}>{selectedNode.status}</Badge>
+						</div>
+						{#if selectedNode.firmware_version}
+							<div class="info-item">
+								<span class="label">Firmware</span>
+								<code>{selectedNode.firmware_version}</code>
+							</div>
+						{/if}
+					</div>
+				</Card>
+
+				<Card padding="md" class="drawer-card">
+					<h3>Power & Signal</h3>
+					<div class="info-grid">
+						{#if selectedNode.battery_v !== null}
+							<div class="info-item">
+								<span class="label">Battery Voltage</span>
+								<span>{selectedNode.battery_v.toFixed(2)}V</span>
+							</div>
+						{/if}
+						{#if selectedNode.battery_pct !== null}
+							<div class="info-item">
+								<span class="label">Battery %</span>
+								<span>{selectedNode.battery_pct.toFixed(0)}%</span>
+							</div>
+						{/if}
+						{#if selectedNode.signal_rssi !== null}
+							<div class="info-item">
+								<span class="label">RSSI</span>
+								<span>{selectedNode.signal_rssi.toFixed(0)} dBm</span>
+							</div>
+						{/if}
+						{#if selectedNode.signal_snr !== null}
+							<div class="info-item">
+								<span class="label">SNR</span>
+								<span>{selectedNode.signal_snr.toFixed(1)} dB</span>
+							</div>
+						{/if}
+					</div>
+				</Card>
+
+				{#if selectedNode.latitude !== null && selectedNode.longitude !== null}
+					<Card padding="md" class="drawer-card">
+						<h3>Location</h3>
+						<div class="info-grid">
+							<div class="info-item">
+								<span class="label">Latitude</span>
+								<span>{selectedNode.latitude.toFixed(6)}</span>
+							</div>
+							<div class="info-item">
+								<span class="label">Longitude</span>
+								<span>{selectedNode.longitude.toFixed(6)}</span>
+							</div>
+						</div>
+					</Card>
+				{/if}
+
+				{#if selectedNode.last_seen_at}
+					<Card padding="md" class="drawer-card">
+						<h3>Last Seen</h3>
+						<p>{new Date(selectedNode.last_seen_at).toLocaleString()}</p>
+					</Card>
+				{/if}
+
+				<Button variant="primary" class="w-full" onclick={() => {
+					drawerOpen = false;
+				}}>
+					Close
+				</Button>
+			</div>
+		</SideDrawer>
+	{/if}
+</PageShell>
+
+<style>
+	.network-page {
+		display: flex;
+		flex-direction: column;
+		gap: 24px;
+		padding: 24px 28px;
+	}
+
+	.filters-section {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+
+	.filter-controls {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+		padding: 16px;
+		background: rgba(255, 255, 255, 0.02);
+		border: 1px solid var(--surface-border);
+		border-radius: 12px;
+	}
+
+	.filter-group {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.filter-group label {
+		font-size: 12px;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--text-muted);
+	}
+
+	.filter-group select {
+		padding: 8px 12px;
+		border: 1px solid var(--surface-border);
+		border-radius: 8px;
+		background: rgba(255, 255, 255, 0.02);
+		color: var(--text-primary);
+		font-size: 12px;
+		cursor: pointer;
+	}
+
+	.filter-buttons {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.filter-buttons button {
+		padding: 8px 12px;
+		border: 1px solid var(--surface-border);
+		border-radius: 8px;
+		background: transparent;
+		color: var(--text-secondary);
+		font-size: 12px;
+		cursor: pointer;
+		transition: all 200ms ease;
+	}
+
+	.filter-buttons button:hover {
+		background: rgba(255, 255, 255, 0.05);
+		color: var(--text-primary);
+	}
+
+	.filter-buttons button.active {
+		background: var(--ember-400);
+		border-color: var(--ember-400);
+		color: white;
+	}
+
+	.table-section {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.table-wrapper {
+		overflow-x: auto;
+		border-radius: 12px;
+		border: 1px solid var(--surface-border);
+	}
+
+	.nodes-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 12px;
+	}
+
+	.nodes-table thead {
+		background: rgba(255, 255, 255, 0.02);
+		border-bottom: 1px solid var(--surface-border);
+	}
+
+	.nodes-table th {
+		padding: 12px;
+		text-align: left;
+		font-weight: 600;
+		color: var(--text-secondary);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		font-size: 11px;
+	}
+
+	.nodes-table th.clickable {
+		cursor: pointer;
+		user-select: none;
+	}
+
+	.nodes-table th.clickable:hover {
+		color: var(--text-primary);
+	}
+
+	.sort-indicator {
+		margin-left: 4px;
+		font-size: 10px;
+	}
+
+	.nodes-table td {
+		padding: 12px;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+		color: var(--text-secondary);
+	}
+
+	.nodes-table tbody tr:hover {
+		background: rgba(255, 255, 255, 0.03);
+	}
+
+	.nodes-table td.monospace {
+		font-family: var(--font-mono);
+		color: var(--text-primary);
+		font-size: 11px;
+	}
+
+	.nodes-table td.numeric {
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.nodes-table td.actions {
+		text-align: right;
+	}
+
+	.empty-state {
+		text-align: center;
+		color: var(--text-muted);
+	}
+
+	.error-card {
+		border-color: var(--status-critical);
+		background: color-mix(in srgb, var(--status-critical) 5%, transparent);
+	}
+
+	.error-card h3 {
+		color: var(--status-critical);
+		margin-top: 0;
+	}
+
+	.drawer-content {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		padding: 16px;
+	}
+
+	.drawer-card {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.drawer-card h3 {
+		margin: 0;
+		font-size: 12px;
+		color: var(--text-primary);
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+	}
+
+	.info-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 12px;
+	}
+
+	.info-item {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.info-item .label {
+		font-size: 10px;
+		text-transform: uppercase;
+		color: var(--text-muted);
+		letter-spacing: 0.05em;
+	}
+
+	.info-item span,
+	.info-item code {
+		font-size: 12px;
+		color: var(--text-primary);
+	}
+
+	.info-item code {
+		font-family: var(--font-mono);
+		background: rgba(255, 255, 255, 0.04);
+		padding: 4px 6px;
+		border-radius: 4px;
+	}
+
+	.drawer-card p {
+		margin: 0;
+		font-size: 12px;
+		color: var(--text-secondary);
+	}
+
+	.w-full {
+		width: 100%;
+	}
+</style>
+
 		const diffHr = Math.floor(diffMin / 60);
 		if (diffHr < 24) return `${diffHr}h ago`;
 		const diffDays = Math.floor(diffHr / 24);

@@ -1,417 +1,415 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount } from 'svelte';
+	import { api, type ApiNode, type ApiTelemetry } from '$lib/api';
 	import PageShell from '$lib/components/PageShell.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import Button from '$lib/components/ui/Button.svelte';
 	import { LineAreaChart } from '$lib/components/charts';
-	import { mockService } from '$lib/mock';
+	import type { SeriesDef } from '$lib/components/charts';
 
-	// View State
-	let viewMode = $state<'node' | 'region'>('node');
-	
-	// Data
-	const sensors = mockService.getSensors();
-	const regions = mockService.getRegions();
-	
-	// Selection State
-	let selectedRegionId = $state(regions[0].id);
-	let selectedNodeId = $state(sensors.find(s => s.regionId === selectedRegionId)?.id ?? sensors[0].id);
-	let selectedDateRange = $state('7d');
-	
-	// Derived state for the view
-	const currentRegion = $derived(mockService.getRegion(selectedRegionId));
-	const currentNode = $derived(mockService.getSensor(selectedNodeId));
-	const regionSensors = $derived(mockService.getSensorsForRegion(selectedRegionId));
-	const telemetry = $derived(currentNode ? mockService.getTelemetry(currentNode.id) : null);
-	
-	// Helper to filter data by date range
-	function filterByDateRange<T extends { timestamp: number }>(data: T[], range: string): T[] {
-		if (!data || data.length === 0) return [];
+	let allNodes = $state<ApiNode[]>([]);
+	let telemetryData = $state<Map<string, ApiTelemetry[]>>(new Map());
+	let loading = $state(true);
+	let error = $state<string | null>(null);
+
+	let selectedNodeId = $state<string | null>(null);
+	let selectedDateRange = $state<'1d' | '7d' | '30d'>('7d');
+
+	const currentNode = $derived(selectedNodeId ? allNodes.find(n => n.id === selectedNodeId) : allNodes[0]);
+	const currentTelemetry = $derived(selectedNodeId ? (telemetryData.get(selectedNodeId) ?? []) : []);
+
+	// Filter telemetry by date range
+	const filteredTelemetry = $derived.by(() => {
+		if (currentTelemetry.length === 0) return [];
+
 		const now = Date.now();
 		let cutoff = now;
-		
-		if (range === '24h') cutoff = now - 24 * 60 * 60 * 1000;
-		else if (range === '7d') cutoff = now - 7 * 24 * 60 * 60 * 1000;
-		else if (range === '30d') cutoff = now - 30 * 24 * 60 * 60 * 1000;
-		else return data; // all
-		
-		return data.filter(d => d.timestamp >= cutoff);
-	}
 
-	// Individual Sensor Data
-	const tempSeries = $derived(filterByDateRange(telemetry?.history.temperature ?? [], selectedDateRange));
-	const moistureSeries = $derived(filterByDateRange(telemetry?.history.soilMoisture ?? [], selectedDateRange));
-	const groundwaterSeries = $derived(filterByDateRange(telemetry?.history.groundwaterLevel ?? [], selectedDateRange));
-	const gasSeries = $derived(filterByDateRange(telemetry?.history.co2Ppm ?? [], selectedDateRange));
-	
-	// Derive historical risk score for a single node (mocked based on temp and moisture)
-	const nodeRiskSeries = $derived(tempSeries.map((t, i) => {
-		const m = moistureSeries[i]?.value ?? 50;
-		// Simple mock calculation: higher temp + lower moisture = higher risk
-		let risk = Math.max(0, Math.min(100, (t.value * 2) + ((100 - m) * 0.5) - 20));
-		return { timestamp: t.timestamp, value: Math.round(risk) };
-	}));
+		if (selectedDateRange === '1d') cutoff = now - 24 * 60 * 60 * 1000;
+		else if (selectedDateRange === '7d') cutoff = now - 7 * 24 * 60 * 60 * 1000;
+		else if (selectedDateRange === '30d') cutoff = now - 30 * 24 * 60 * 60 * 1000;
 
-	// Regional Data (Average across nodes)
-	const regionalRiskSeries = $derived.by(() => {
-		// Mock historical regional risk data based on the region's current composite risk
-		const baseRisk = mockService.getRiskIndex(selectedRegionId)?.composite ?? 50;
-		const now = Date.now();
-		const days = selectedDateRange === '24h' ? 1 : selectedDateRange === '7d' ? 7 : selectedDateRange === '30d' ? 30 : 90;
-		const points = days * 24; // 1 point per hour
-		
-		const data = [];
-		for(let i = 0; i < points; i++) {
-			const time = now - (points - i) * 60 * 60 * 1000;
-			// Add some noise
-			const noise = Math.sin(i * 0.1) * 5 + Math.cos(i * 0.05) * 3;
-			data.push({ timestamp: time, value: Math.max(0, Math.min(100, baseRisk + noise)) });
-		}
-		return data;
+		return currentTelemetry.filter(t => {
+			const tTime = new Date(t.received_at).getTime();
+			return tTime >= cutoff;
+		});
 	});
 
-	// Region Comparison Data
-	const regionComparisonSeries = $derived(regions.map((r, index) => {
-		const baseRisk = mockService.getRiskIndex(r.id)?.composite ?? 50;
-		const now = Date.now();
-		const data = [];
-		for(let i = 0; i < 24; i++) {
-			const time = now - (24 - i) * 60 * 60 * 1000;
-			data.push({ timestamp: time, value: Math.max(0, Math.min(100, baseRisk + Math.sin(i * 0.2 + index) * 5)) });
+	// Build chart series
+	const tempSeries = $derived(
+		filteredTelemetry.map(t => ({
+			timestamp: new Date(t.received_at).getTime(),
+			value: t.temp_5 ?? 0
+		}))
+	);
+
+	const coSeries = $derived(
+		filteredTelemetry.map(t => ({
+			timestamp: new Date(t.received_at).getTime(),
+			value: t.co ?? 0
+		}))
+	);
+
+	const co2Series = $derived(
+		filteredTelemetry.map(t => ({
+			timestamp: new Date(t.received_at).getTime(),
+			value: t.co2 ?? 0
+		}))
+	);
+
+	const moistureSeries = $derived(
+		filteredTelemetry.map(t => ({
+			timestamp: new Date(t.received_at).getTime(),
+			value: t.moisture ?? 0
+		}))
+	);
+
+	const temperatureChartSeries = $derived([
+		{ id: 'temp', label: 'Temperature at 5cm (°C)', data: tempSeries, color: 'var(--ember-400)' }
+	] as SeriesDef[]);
+
+	const gasChartSeries = $derived([
+		{ id: 'co', label: 'CO (ppm)', data: coSeries, color: 'var(--status-warning)' },
+		{ id: 'co2', label: 'CO2 (ppm)', data: co2Series, color: 'var(--status-critical)', filled: false }
+	] as SeriesDef[]);
+
+	const moistureChartSeries = $derived([
+		{ id: 'moisture', label: 'Soil Moisture (%)', data: moistureSeries, color: 'var(--status-online)' }
+	] as SeriesDef[]);
+
+	// Statistics
+	const stats = $derived.by(() => {
+		if (filteredTelemetry.length === 0) {
+			return { temp: 0, co: 0, co2: 0, moisture: 0, readings: 0 };
 		}
+
+		const validTemps = filteredTelemetry.filter(t => t.temp_5 !== null);
+		const validCO = filteredTelemetry.filter(t => t.co !== null);
+		const validCO2 = filteredTelemetry.filter(t => t.co2 !== null);
+		const validMoisture = filteredTelemetry.filter(t => t.moisture !== null);
+
 		return {
-			id: r.id,
-			label: r.name,
-			data: data,
-			color: `hsl(${10 + index * 40}, 80%, 50%)`,
-			filled: false
+			temp: validTemps.reduce((s, t) => s + (t.temp_5 ?? 0), 0) / (validTemps.length || 1),
+			co: validCO.reduce((s, t) => s + (t.co ?? 0), 0) / (validCO.length || 1),
+			co2: validCO2.reduce((s, t) => s + (t.co2 ?? 0), 0) / (validCO2.length || 1),
+			moisture: validMoisture.reduce((s, t) => s + (t.moisture ?? 0), 0) / (validMoisture.length || 1),
+			readings: filteredTelemetry.length
 		};
-	}));
-
-	// CSV Export functionality
-	function downloadBlob(filename: string, content: string) {
-		const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = filename;
-		document.body.appendChild(a);
-		a.click();
-		document.body.removeChild(a);
-		URL.revokeObjectURL(url);
-	}
-
-	function exportCSV() {
-		let csvContent = "";
-		let filename = "";
-
-		if (viewMode === 'node') {
-			filename = `node_history_${selectedNodeId}_${selectedDateRange}.csv`;
-			const headers = ['Timestamp', 'Risk Score', 'Temperature (C)', 'Soil Moisture (%)', 'Groundwater (m)', 'CO2 (ppm)'];
-			csvContent += headers.join(',') + '\n';
-			
-			for(let i = 0; i < tempSeries.length; i++) {
-				const time = new Date(tempSeries[i].timestamp).toISOString();
-				const risk = nodeRiskSeries[i]?.value ?? 0;
-				const temp = tempSeries[i]?.value ?? 0;
-				const moist = moistureSeries[i]?.value ?? 0;
-				const gw = groundwaterSeries[i]?.value ?? 0;
-				const gas = gasSeries[i]?.value ?? 0;
-				
-				csvContent += `${time},${risk},${temp},${moist},${gw},${gas}\n`;
-			}
-		} else {
-			filename = `region_history_${selectedRegionId}_${selectedDateRange}.csv`;
-			const headers = ['Timestamp', 'Avg Risk Score'];
-			csvContent += headers.join(',') + '\n';
-			
-			for(let i = 0; i < regionalRiskSeries.length; i++) {
-				const time = new Date(regionalRiskSeries[i].timestamp).toISOString();
-				const risk = regionalRiskSeries[i].value;
-				csvContent += `${time},${risk.toFixed(2)}\n`;
-			}
-		}
-
-		downloadBlob(filename, csvContent);
-	}
-	
-	// Sync node selection when region changes
-	$effect(() => {
-		if (selectedRegionId) {
-			const validSensors = mockService.getSensorsForRegion(selectedRegionId);
-			if (validSensors.length > 0 && !validSensors.find(s => s.id === selectedNodeId)) {
-				selectedNodeId = validSensors[0].id;
-			}
-		}
 	});
 
+	async function loadData() {
+		try {
+			loading = true;
+			const nodes = await api.getNodes();
+			allNodes = nodes.filter(n => n.status === 'online');
+
+			if (allNodes.length > 0) {
+				if (!selectedNodeId) {
+					selectedNodeId = allNodes[0].id;
+				}
+
+				// Load telemetry for all online nodes
+				const telemetryMap = new Map<string, ApiTelemetry[]>();
+				for (const node of allNodes) {
+					const telem = await api.getTelemetry(node.id, { limit: 500 });
+					telemetryMap.set(node.id, telem);
+				}
+				telemetryData = telemetryMap;
+			}
+
+			error = null;
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to load data';
+		} finally {
+			loading = false;
+		}
+	}
+
+	onMount(() => {
+		void loadData();
+		const poll = window.setInterval(() => void loadData(), 60_000);
+		return () => window.clearInterval(poll);
+	});
 </script>
 
 <svelte:head>
-	<title>Historical Analytics — EmberRoot</title>
+	<title>Live Monitoring — EmberRoot</title>
 </svelte:head>
 
 <PageShell
-	title="Historical Query & Analytics"
-	subtitle="Interactive historical analysis of risk scores and telemetry across regions and individual nodes"
-	breadcrumb={['EmberRoot', 'Operations', 'Historical Analytics']}
+	title="Live Monitoring"
+	subtitle="Real-time telemetry analysis from your sensor network"
+	breadcrumb={['EmberRoot', 'Monitoring', 'Live']}
 >
-	<div class="analytics-layout">
-		<!-- Toolbar -->
-		<Card padding="md" class="toolbar-card">
-			<div class="toolbar-content">
-				<div class="view-toggle">
-					<button 
-						class="toggle-btn" 
-						class:active={viewMode === 'node'} 
-						onclick={() => viewMode = 'node'}
-					>
-						Node View
-					</button>
-					<button 
-						class="toggle-btn" 
-						class:active={viewMode === 'region'} 
-						onclick={() => viewMode = 'region'}
-					>
-						Region View
-					</button>
-				</div>
-				
-				<div class="filters">
-					<select class="er-select" bind:value={selectedRegionId}>
-						{#each regions as region}
-							<option value={region.id}>{region.name}</option>
+	<div class="monitoring-layout">
+		{#if error}
+			<Card padding="lg" class="error-card">
+				<h3>Error Loading Data</h3>
+				<p>{error}</p>
+			</Card>
+		{/if}
+
+		<!-- Controls -->
+		<Card padding="md" class="controls-card">
+			<div class="controls">
+				<div class="control-group">
+					<label for="node-select">Select Node</label>
+					<select id="node-select" bind:value={selectedNodeId}>
+						{#each allNodes as node}
+							<option value={node.id}>{node.name || node.id}</option>
 						{/each}
 					</select>
-					
-					{#if viewMode === 'node'}
-						<select class="er-select" bind:value={selectedNodeId}>
-							{#each regionSensors as sensor}
-								<option value={sensor.id}>{sensor.id} - {sensor.name}</option>
-							{/each}
-						</select>
-					{/if}
-					
-					<select class="er-select" bind:value={selectedDateRange}>
-						<option value="24h">Last 24 Hours</option>
+				</div>
+
+				<div class="control-group">
+					<label for="range-select">Date Range</label>
+					<select id="range-select" bind:value={selectedDateRange}>
+						<option value="1d">Last 24 Hours</option>
 						<option value="7d">Last 7 Days</option>
 						<option value="30d">Last 30 Days</option>
-						<option value="all">All Time</option>
 					</select>
-					
-					<Button variant="primary" size="sm" onclick={exportCSV}>
-						<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right: 6px;">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-						</svg>
-						Export CSV
-					</Button>
 				</div>
 			</div>
 		</Card>
 
-		<div class="charts-grid">
-			{#if viewMode === 'node'}
-				<!-- Node Level Analytics -->
-				<Card padding="lg" class="main-chart">
-					<div class="chart-header">
-						<h3>Historical Risk Score — {currentNode?.name || selectedNodeId}</h3>
-						<Badge variant="warning">Node Level</Badge>
+		{#if loading}
+			<Card padding="lg">
+				<p>Loading telemetry data...</p>
+			</Card>
+		{:else if !currentNode}
+			<Card padding="lg" class="error-card">
+				<p>No online nodes available.</p>
+			</Card>
+		{:else}
+			<!-- Node Status -->
+			<Card padding="lg" class="status-card">
+				<div class="status-header">
+					<div class="status-info">
+						<h2>{currentNode.name || currentNode.id}</h2>
+						<p>{currentNode.id}</p>
 					</div>
-					<div class="chart-container">
-						<LineAreaChart 
-							series={[{ id: 'risk', label: 'Risk Score', data: nodeRiskSeries, color: 'var(--ember-400)' }]} 
-							unit="" 
-							height={300} 
-						/>
+					<div class="status-badges">
+						<Badge variant="online">{currentNode.status}</Badge>
+						{#if currentNode.battery_pct !== null}
+							<Badge variant="neutral">{currentNode.battery_pct.toFixed(0)}% battery</Badge>
+						{/if}
 					</div>
+				</div>
+			</Card>
+
+			<!-- Statistics Cards -->
+			<div class="stats-grid">
+				<Card padding="md" class="stat-card">
+					<div class="stat-label">Avg Temperature</div>
+					<div class="stat-value">{stats.temp.toFixed(1)}</div>
+					<div class="stat-unit">°C</div>
 				</Card>
-				
-				<Card padding="lg" class="sub-chart">
-					<div class="chart-header">
-						<h3>Temperature & Humidity</h3>
-					</div>
-					<div class="chart-container">
-						<LineAreaChart 
-							series={[
-								{ id: 'temp', label: 'Temp (°C)', data: tempSeries, color: '#f59e0b' },
-								{ id: 'moisture', label: 'Moisture (%)', data: moistureSeries, color: '#3b82f6', filled: false }
-							]} 
-							unit="" 
-							height={220} 
-						/>
-					</div>
+				<Card padding="md" class="stat-card">
+					<div class="stat-label">Avg CO</div>
+					<div class="stat-value">{stats.co.toFixed(2)}</div>
+					<div class="stat-unit">ppm</div>
 				</Card>
-				
-				<Card padding="lg" class="sub-chart">
-					<div class="chart-header">
-						<h3>Gas & Hydrology</h3>
-					</div>
-					<div class="chart-container">
-						<LineAreaChart 
-							series={[
-								{ id: 'gas', label: 'CO2 (ppm)', data: gasSeries, color: '#8b5cf6' },
-								{ id: 'gw', label: 'Groundwater (m)', data: groundwaterSeries, color: '#06b6d4', filled: false }
-							]} 
-							unit="" 
-							height={220} 
-						/>
-					</div>
+				<Card padding="md" class="stat-card">
+					<div class="stat-label">Avg CO2</div>
+					<div class="stat-value">{stats.co2.toFixed(0)}</div>
+					<div class="stat-unit">ppm</div>
 				</Card>
-			{:else}
-				<!-- Region Level Analytics -->
-				<Card padding="lg" class="main-chart">
-					<div class="chart-header">
-						<h3>Average Regional Risk Score — {currentRegion?.name}</h3>
-						<Badge variant="ember">Region Level</Badge>
-					</div>
-					<p class="chart-desc">Computed average risk across {regionSensors.length} active nodes in the management zone.</p>
-					<div class="chart-container">
-						<LineAreaChart 
-							series={[{ id: 'regRisk', label: 'Avg Risk Score', data: regionalRiskSeries, color: 'var(--status-critical)' }]} 
-							unit="" 
-							height={300} 
-						/>
-					</div>
+				<Card padding="md" class="stat-card">
+					<div class="stat-label">Avg Moisture</div>
+					<div class="stat-value">{stats.moisture.toFixed(0)}</div>
+					<div class="stat-unit">%</div>
 				</Card>
-				
-				<Card padding="lg" class="full-width-chart">
-					<div class="chart-header">
-						<h3>Regional Risk Comparison</h3>
-						<Badge variant="neutral">Global</Badge>
-					</div>
-					<p class="chart-desc">Comparing average risk scores across all operating regions over the last 24 hours.</p>
-					<div class="chart-container">
-						<LineAreaChart 
-							series={regionComparisonSeries} 
-							unit="" 
-							height={300} 
-						/>
-					</div>
+				<Card padding="md" class="stat-card">
+					<div class="stat-label">Total Readings</div>
+					<div class="stat-value">{stats.readings}</div>
+					<div class="stat-unit">samples</div>
+				</Card>
+			</div>
+
+			<!-- Charts -->
+			{#if tempSeries.length > 0}
+				<Card padding="lg" class="chart-card">
+					<h3>Temperature Trend</h3>
+					<LineAreaChart series={temperatureChartSeries} unit="°C" height={280} />
 				</Card>
 			{/if}
-		</div>
+
+			{#if coSeries.length > 0 || co2Series.length > 0}
+				<Card padding="lg" class="chart-card">
+					<h3>Gas Levels</h3>
+					<LineAreaChart series={gasChartSeries} unit="ppm" height={280} />
+				</Card>
+			{/if}
+
+			{#if moistureSeries.length > 0}
+				<Card padding="lg" class="chart-card">
+					<h3>Soil Moisture</h3>
+					<LineAreaChart series={moistureChartSeries} unit="%" height={280} />
+				</Card>
+			{/if}
+		{/if}
 	</div>
 </PageShell>
 
 <style>
-	.analytics-layout {
+	.monitoring-layout {
 		display: flex;
 		flex-direction: column;
+		gap: 24px;
+		padding: 24px 28px;
+	}
+
+	.controls-card {
+		display: flex;
 		gap: 16px;
 	}
 
-	.toolbar-card {
-		background: rgba(15, 23, 42, 0.6);
-		border-color: rgba(255, 255, 255, 0.08);
-	}
-
-	.toolbar-content {
+	.controls {
 		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 16px;
-	}
-
-	.view-toggle {
-		display: flex;
-		background: rgba(0, 0, 0, 0.3);
-		border-radius: 8px;
-		padding: 4px;
-		border: 1px solid rgba(255, 255, 255, 0.1);
-	}
-
-	.toggle-btn {
-		background: transparent;
-		border: none;
-		color: var(--text-muted);
-		padding: 6px 16px;
-		font-size: 13px;
-		font-weight: 600;
-		border-radius: 6px;
-		cursor: pointer;
-		transition: all 0.2s ease;
-	}
-
-	.toggle-btn.active {
-		background: var(--surface-raised);
-		color: var(--text-primary);
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-	}
-
-	.filters {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		flex-wrap: wrap;
-	}
-
-	.er-select {
-		background: var(--surface-base);
-		color: var(--text-primary);
-		border: 1px solid var(--surface-border);
-		border-radius: 6px;
-		padding: 6px 12px;
-		font-size: 13px;
-		font-family: inherit;
-		outline: none;
-		cursor: pointer;
-		min-width: 140px;
-	}
-	
-	.er-select:focus {
-		border-color: var(--ember-400);
-	}
-
-	.charts-grid {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 16px;
-	}
-
-	.main-chart {
-		grid-column: 1 / -1;
-	}
-	
-	.full-width-chart {
-		grid-column: 1 / -1;
-	}
-
-	.sub-chart {
-		display: flex;
-		flex-direction: column;
-	}
-
-	.chart-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 8px;
-	}
-
-	.chart-header h3 {
-		margin: 0;
-		font-size: 16px;
-		font-weight: 600;
-		color: var(--text-primary);
-	}
-
-	.chart-desc {
-		font-size: 13px;
-		color: var(--text-muted);
-		margin: 0 0 16px 0;
-	}
-
-	.chart-container {
-		flex: 1;
+		gap: 24px;
 		width: 100%;
-		position: relative;
+	}
+
+	.control-group {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		flex: 1;
+		max-width: 300px;
+	}
+
+	.control-group label {
+		font-size: 12px;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--text-muted);
+	}
+
+	.control-group select {
+		padding: 8px 12px;
+		border: 1px solid var(--surface-border);
+		border-radius: 8px;
+		background: rgba(255, 255, 255, 0.02);
+		color: var(--text-primary);
+		font-size: 12px;
+	}
+
+	.status-card {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.status-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 16px;
+	}
+
+	.status-info {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.status-info h2 {
+		margin: 0;
+		font-size: 18px;
+		color: var(--text-primary);
+	}
+
+	.status-info p {
+		margin: 0;
+		font-size: 12px;
+		color: var(--text-muted);
+		font-family: var(--font-mono);
+	}
+
+	.status-badges {
+		display: flex;
+		gap: 8px;
+	}
+
+	.stats-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+		gap: 12px;
+	}
+
+	:global(.stat-card) {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 4px;
+		text-align: center;
+		padding: 16px !important;
+	}
+
+	.stat-label {
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--text-muted);
+	}
+
+	.stat-value {
+		font-size: 22px;
+		font-weight: 700;
+		color: var(--text-primary);
+	}
+
+	.stat-unit {
+		font-size: 10px;
+		color: var(--text-secondary);
+	}
+
+	.chart-card {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.chart-card h3 {
+		margin: 0;
+		font-size: 14px;
+		color: var(--text-primary);
+	}
+
+	.error-card {
+		border-color: var(--status-critical);
+		background: color-mix(in srgb, var(--status-critical) 5%, transparent);
+	}
+
+	.error-card h3 {
+		color: var(--status-critical);
+		margin-top: 0;
 	}
 
 	@media (max-width: 900px) {
-		.charts-grid {
+		.controls {
+			flex-direction: column;
+		}
+
+		.control-group {
+			max-width: 100%;
+		}
+
+		.status-header {
+			flex-direction: column;
+			align-items: flex-start;
+		}
+
+		.stats-grid {
+			grid-template-columns: repeat(2, 1fr);
+		}
+	}
+
+	@media (max-width: 600px) {
+		.stats-grid {
 			grid-template-columns: 1fr;
 		}
 	}
-</style>
+</style>
