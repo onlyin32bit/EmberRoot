@@ -306,6 +306,7 @@ void publishMQTT(String payload)
     sendCommand("AT+CSSLCFG=\"sslversion\",0,4", "OK", 2000);       // TLS 1.2
     sendCommand("AT+CSSLCFG=\"authmode\",0,0", "OK", 2000);         // No server certificate verification
     sendCommand("AT+CSSLCFG=\"ignorelocaltime\",0,1", "OK", 2000);  // Ignore local time mismatch (handy if RTC is off)
+    sendCommand("AT+CSSLCFG=\"enableSNI\",0,1", "OK", 2000);        // Enable SNI for cloud brokers (like EMQX Cloud)
     // Link MQTT client 0 to SSL context 0
     sendCommand("AT+CMQTTSSLCFG=0,0", "OK", 2000);
   }
