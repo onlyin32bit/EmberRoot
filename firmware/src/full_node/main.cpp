@@ -331,8 +331,6 @@ void publishMQTT(String payload)
     sendCommand("AT+CSSLCFG=\"authmode\",0,0", "OK", 2000);         // No server certificate verification
     sendCommand("AT+CSSLCFG=\"ignorelocaltime\",0,1", "OK", 2000);  // Ignore local time mismatch (handy if RTC is off)
     sendCommand("AT+CSSLCFG=\"enableSNI\",0,1", "OK", 2000);        // Enable SNI for cloud brokers (like EMQX Cloud)
-    // Link MQTT client 0 to SSL context 0
-    sendCommand("AT+CMQTTSSLCFG=0,0", "OK", 2000);
   }
 
   // 3. Acquire Client (0 is client index, 0 is TCP, 1 is SSL)
@@ -347,18 +345,18 @@ void publishMQTT(String payload)
     return;
   }
 
+  if (isSSL)
+  {
+    // Link MQTT client 0 to SSL context 0. Must be done AFTER acquiring client (CMQTTACCQ)
+    sendCommand("AT+CMQTTSSLCFG=0,0", "OK", 2000);
+  }
+
   // 4. Connect to Broker (asynchronous, wait for +CMQTTCONNECT: 0,0 success)
   // We send the parameters piece-by-piece to avoid heap allocations
   while (simSerial.available() > 0) simSerial.read();
   simSerial.print(F("AT+CMQTTCONNECT=0,\""));
-  if (isSSL)
-  {
-    simSerial.print(F("ssl://"));
-  }
-  else
-  {
-    simSerial.print(F("tcp://"));
-  }
+  // Always use tcp:// prefix, as SIMCom modules use SSL context routing based on port 8883 and CMQTTSSLCFG
+  simSerial.print(F("tcp://"));
   simSerial.print(MQTT_BROKER);
   simSerial.print(F(":"));
   simSerial.print(MQTT_PORT);
