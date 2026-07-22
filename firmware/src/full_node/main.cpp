@@ -100,6 +100,9 @@ bool checkSimInternet()
     return false;
   }
   
+  // Turn off command echo to prevent SoftwareSerial RX buffer overflow on long commands
+  sendCommand("ATE0", "OK", 1000);
+  
   // 2. CPIN check (SIM card presence and status)
   if (!sendCommand("AT+CPIN?", "READY", 2000))
   {
