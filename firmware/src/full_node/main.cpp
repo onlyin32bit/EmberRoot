@@ -38,7 +38,7 @@
 
 DHT dht(DHTPIN, DHTTYPE);
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
-SoftwareSerial simSerial(2, 3);
+SoftwareSerial simSerial(3, 2);
 
 void publishMQTT(String payload);
 bool sendCommand(const char* cmd, const char* expected, uint32_t timeoutMs);
@@ -200,7 +200,19 @@ bool checkSimInternet()
 void setup()
 {
   Serial.begin(9600);
-  simSerial.begin(9600); // Switched from 115200 to 9600 for SoftwareSerial stability
+  
+  // Try to connect at 115200 first to configure/force the module to 9600 baud rate
+  Serial.println(F("Configuring SIM module baud rate..."));
+  simSerial.begin(115200);
+  delay(1000);
+  simSerial.println("AT+IPR=9600");
+  delay(1000);
+  simSerial.println("AT&W"); // Save configuration permanently in SIM module NVRAM
+  delay(1000);
+  
+  // Re-start SoftwareSerial communication at the stable 9600 rate
+  simSerial.begin(9600);
+  
   dht.begin();
   mlx.begin();
 
