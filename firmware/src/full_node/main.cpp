@@ -41,6 +41,108 @@ Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 SoftwareSerial simSerial(2, 3);
 
 void publishMQTT(String payload);
+bool sendCommand(const char* cmd, const char* expected, uint32_t timeoutMs);
+bool checkSimInternet();
+
+bool sendCommand(const char* cmd, const char* expected, uint32_t timeoutMs)
+{
+  // Clear any leftover data in buffer
+  while (simSerial.available() > 0)
+  {
+    simSerial.read();
+  }
+
+  simSerial.println(cmd);
+  
+  uint32_t startTime = millis();
+  String response = "";
+  
+  while (millis() - startTime < timeoutMs)
+  {
+    if (simSerial.available() > 0)
+    {
+      char c = simSerial.read();
+      response += c;
+      if (response.indexOf(expected) != -1)
+      {
+        return true;
+      }
+    }
+  }
+  
+  Serial.print("Command ");
+  Serial.print(cmd);
+  Serial.print(" failed. Response: ");
+  Serial.println(response);
+  return false;
+}
+
+bool checkSimInternet()
+{
+  Serial.println("Starting SIM module initialization check...");
+  
+  // 1. Basic AT communication check
+  if (!sendCommand("AT", "OK", 2000))
+  {
+    Serial.println("Error: SIM module is not responding!");
+    return false;
+  }
+  
+  // 2. CPIN check (SIM card presence and status)
+  if (!sendCommand("AT+CPIN?", "READY", 2000))
+  {
+    Serial.println("Error: SIM card is not ready or PIN locked!");
+    return false;
+  }
+  
+  // 3. Network registration checks (CREG for GSM, CEREG for LTE, CGREG for GPRS)
+  // Network registration can take some time, so we retry a few times.
+  bool registered = false;
+  for (int i = 0; i < 15; i++)
+  {
+    if (sendCommand("AT+CEREG?", "+CEREG: 0,1", 1000) || sendCommand("AT+CEREG?", "+CEREG: 0,5", 1000) ||
+        sendCommand("AT+CGREG?", "+CGREG: 0,1", 1000) || sendCommand("AT+CGREG?", "+CGREG: 0,5", 1000) ||
+        sendCommand("AT+CREG?", "+CREG: 0,1", 1000) || sendCommand("AT+CREG?", "+CREG: 0,5", 1000))
+    {
+      registered = true;
+      break;
+    }
+    Serial.print("Searching for network... (attempt ");
+    Serial.print(i + 1);
+    Serial.println("/15)");
+    delay(2000);
+  }
+  
+  if (!registered)
+  {
+    Serial.println("Error: SIM module failed to register to network!");
+    return false;
+  }
+  
+  // 4. GPRS/Packet service attachment check
+  bool attached = false;
+  for (int i = 0; i < 10; i++)
+  {
+    if (sendCommand("AT+CGATT?", "+CGATT: 1", 2000))
+    {
+      attached = true;
+      break;
+    }
+    Serial.print("Waiting for GPRS/Packet service attachment... (attempt ");
+    Serial.print(i + 1);
+    Serial.println("/10)");
+    delay(2000);
+  }
+  
+  if (!attached)
+  {
+    Serial.println("Error: GPRS service not attached!");
+    return false;
+  }
+  
+  Serial.println("Success: SIM module has active internet connection!");
+  return true;
+}
 
 void setup()
 {
@@ -56,7 +158,18 @@ void setup()
   }
 
   Serial.println("System Initializing...");
-  delay(10000);
+  delay(2000);
+
+  if (checkSimInternet())
+  {
+    Serial.println("SIM Module Internet Check: PASSED");
+  }
+  else
+  {
+    Serial.println("SIM Module Internet Check: FAILED");
+  }
+
+  delay(5000);
 }
 
 void loop()
