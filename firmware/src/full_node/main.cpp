@@ -311,8 +311,7 @@ void publishMQTT(String payload)
   String accqCmd = "AT+CMQTTACCQ=0,\"" + String(MQTT_CLIENT_ID) + "\"," + (isSSL ? "1" : "0");
   sendCommand(accqCmd.c_str(), "OK", 2000);
 
-  // 4. Connect to Broker
-  // SIMCom modules expect "tcp://<broker>:<port>" for AT+CMQTTCONNECT even in SSL mode
+  // 4. Connect to Broker (asynchronous, wait for +CMQTTCONNECT: 0,0 success)
   String connectCmd = "AT+CMQTTCONNECT=0,\"tcp://" + String(MQTT_BROKER) + ":" + String(MQTT_PORT) + "\",60,1";
   String username = String(MQTT_USER);
   String password = String(MQTT_PASS);
@@ -321,7 +320,7 @@ void publishMQTT(String payload)
     connectCmd += ",\"" + username + "\",\"" + password + "\"";
   }
   
-  if (!sendCommand(connectCmd.c_str(), "OK", 15000))
+  if (!sendCommand(connectCmd.c_str(), "+CMQTTCONNECT: 0,0", 15000))
   {
     Serial.println(F("MQTT connection failed!"));
     // Clean up acquired client
@@ -333,15 +332,33 @@ void publishMQTT(String payload)
   // 5. Set Topic
   String topic = String(MQTT_TOPIC);
   String topicCmd = "AT+CMQTTTOPIC=0," + String(topic.length());
+  bool topicInputSuccess = false;
   if (sendCommand(topicCmd.c_str(), ">", 2000))
   {
     simSerial.print(topic);
-    delay(1000);
+    
+    // Wait for "OK" response confirming the topic input has been accepted
+    uint32_t start = millis();
+    String resp = "";
+    while (millis() - start < 3000)
+    {
+      if (simSerial.available() > 0)
+      {
+        char c = simSerial.read();
+        resp += c;
+        if (resp.indexOf("OK") != -1)
+        {
+          topicInputSuccess = true;
+          break;
+        }
+      }
+    }
   }
-  else
+
+  if (!topicInputSuccess)
   {
     Serial.println(F("Failed to set MQTT topic!"));
-    sendCommand("AT+CMQTTDISC=0,120", "OK", 5000);
+    sendCommand("AT+CMQTTDISC=0,120", "+CMQTTDISC: 0,0", 5000);
     sendCommand("AT+CMQTTRELEASE=0", "OK", 2000);
     sendCommand("AT+CMQTTSTOP", "OK", 2000);
     return;
@@ -349,28 +366,46 @@ void publishMQTT(String payload)
 
   // 6. Set Payload
   String payloadCmd = "AT+CMQTTPAYLOAD=0," + String(payload.length());
+  bool payloadInputSuccess = false;
   if (sendCommand(payloadCmd.c_str(), ">", 2000))
   {
     simSerial.print(payload);
-    delay(1000);
+    
+    // Wait for "OK" response confirming the payload input has been accepted
+    uint32_t start = millis();
+    String resp = "";
+    while (millis() - start < 3000)
+    {
+      if (simSerial.available() > 0)
+      {
+        char c = simSerial.read();
+        resp += c;
+        if (resp.indexOf("OK") != -1)
+        {
+          payloadInputSuccess = true;
+          break;
+        }
+      }
+    }
   }
-  else
+
+  if (!payloadInputSuccess)
   {
     Serial.println(F("Failed to set MQTT payload!"));
-    sendCommand("AT+CMQTTDISC=0,120", "OK", 5000);
+    sendCommand("AT+CMQTTDISC=0,120", "+CMQTTDISC: 0,0", 5000);
     sendCommand("AT+CMQTTRELEASE=0", "OK", 2000);
     sendCommand("AT+CMQTTSTOP", "OK", 2000);
     return;
   }
 
-  // 7. Publish
-  if (!sendCommand("AT+CMQTTPUB=0,1,60", "OK", 10000))
+  // 7. Publish (asynchronous, wait for +CMQTTPUB: 0,0 success)
+  if (!sendCommand("AT+CMQTTPUB=0,1,60", "+CMQTTPUB: 0,0", 10000))
   {
     Serial.println(F("MQTT publish failed!"));
   }
 
   // 8. Disconnect and release resources
-  sendCommand("AT+CMQTTDISC=0,120", "OK", 5000);
+  sendCommand("AT+CMQTTDISC=0,120", "+CMQTTDISC: 0,0", 5000);
   sendCommand("AT+CMQTTRELEASE=0", "OK", 2000);
   sendCommand("AT+CMQTTSTOP", "OK", 2000);
 }

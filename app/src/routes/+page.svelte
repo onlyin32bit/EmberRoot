@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { mockService } from '$lib/mock';
+	import { api, type ApiAlert, type ApiNode } from '$lib/api';
 	import { selectedRegionId } from '$lib/stores/regionContext';
 	import type { SeriesDef } from '$lib/components/charts';
 
@@ -53,6 +55,36 @@
 
 	const now    = new Date();
 	const nowStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+	// The dashboard retains mock widgets while the remaining screens are migrated,
+	// but its network status and field counts come from the production API.
+	let apiNodes = $state<ApiNode[]>([]);
+	let apiAlerts = $state<ApiAlert[]>([]);
+	let apiError = $state<string | null>(null);
+	let apiLoading = $state(true);
+
+	async function refreshLiveData() {
+		try {
+			const [nodes, alerts] = await Promise.all([api.getNodes(), api.getAlerts()]);
+			apiNodes = nodes;
+			apiAlerts = alerts;
+			apiError = null;
+		} catch (error) {
+			apiError = error instanceof Error ? error.message : 'Unable to reach the EmberRoot API';
+		} finally {
+			apiLoading = false;
+		}
+	}
+
+	onMount(() => {
+		void refreshLiveData();
+		const unsubscribe = api.connectRealtime(() => void refreshLiveData());
+		const poll = window.setInterval(() => void refreshLiveData(), 30_000);
+		return () => {
+			unsubscribe?.();
+			window.clearInterval(poll);
+		};
+	});
 </script>
 
 <svelte:head>
@@ -69,9 +101,19 @@
 		<div class="dash__header-actions">
 			<Badge variant="online">
 				<span class="dash__live-dot"></span>
-				Live
+				{apiLoading ? 'Connecting' : apiError ? 'API offline' : 'Live API'}
 			</Badge>
 		</div>
+	</div>
+
+	<div class:dash__api-status--error={Boolean(apiError)} class="dash__api-status" role="status">
+		{#if apiError}
+			API connection unavailable: {apiError}. Showing prototype widgets until the service is reachable.
+		{:else if apiLoading}
+			Connecting to the EmberRoot API…
+		{:else}
+			Field data: {apiNodes.length} nodes · {apiNodes.filter((node) => node.status === 'online').length} online · {apiAlerts.filter((alert) => alert.state === 'open').length} open alerts
+		{/if}
 	</div>
 
 	<div class="dash__row dash__row--top">
@@ -132,6 +174,18 @@
 		align-items: center;
 		gap: 8px;
 		flex-shrink: 0;
+	}
+	.dash__api-status {
+		font-size: 12px;
+		padding: 9px 12px;
+		border: 1px solid color-mix(in srgb, var(--status-online) 30%, transparent);
+		background: color-mix(in srgb, var(--status-online) 8%, transparent);
+		border-radius: 10px;
+		color: var(--text-secondary);
+	}
+	.dash__api-status--error {
+		border-color: color-mix(in srgb, var(--status-warning) 45%, transparent);
+		background: color-mix(in srgb, var(--status-warning) 8%, transparent);
 	}
 
 	.dash__focus-card {

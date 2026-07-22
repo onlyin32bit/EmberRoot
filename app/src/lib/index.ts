@@ -13,3 +13,6 @@ export type {
 	Region, Weather, RiskIndex,
 	StatusLevel, Severity, TrendDirection, LatLon, TimeSeries
 } from './mock/index.js';
+
+export { api, EmberRootApiClient } from './api/index.js';
+export type * from './api/index.js';

@@ -1,7 +1,30 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "api",
-  "compatibility_date": "2025-08-03",
+  "name": "emberroot-api",
+  "compatibility_date": "2026-07-22",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "./src/index.ts"
+  "main": "./src/index.ts",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "emberroot",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "REALTIME_HUB", "class_name": "RealtimeHub" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["RealtimeHub"] }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "ENVIRONMENT": "development"
+  }
 }
