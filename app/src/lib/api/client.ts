@@ -69,6 +69,20 @@ export class EmberRootApiClient {
 		return this.request(`/api/alerts/${encodeURIComponent(id)}/acknowledge`, { method: 'POST' });
 	}
 
+	// Admin
+	isAuthenticated(): boolean {
+		return this.token !== null;
+	}
+	getAdminNodes(): Promise<ApiNode[]> {
+		return this.request('/api/admin/nodes');
+	}
+	createAdminNode(data: { id: string; name: string; regionId: string; nodeType: string; latitude?: number; longitude?: number }): Promise<{ id: string }> {
+		return this.request('/api/admin/nodes', {
+			method: 'POST',
+			body: JSON.stringify(data)
+		});
+	}
+
 	connectRealtime(onEvent: (event: RealtimeEvent) => void, onError?: () => void): (() => void) | null {
 		if (!this.token || typeof WebSocket === 'undefined') return null;
 		const wsBase = API_BASE_URL.replace(/^http/u, 'ws');
