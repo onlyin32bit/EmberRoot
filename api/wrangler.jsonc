@@ -1,30 +1,40 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "emberroot-api",
-  "compatibility_date": "2026-07-22",
-  "compatibility_flags": ["nodejs_compat"],
-  "main": "./src/index.ts",
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "emberroot",
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "./migrations"
-    }
-  ],
-  "durable_objects": {
-    "bindings": [
-      { "name": "REALTIME_HUB", "class_name": "RealtimeHub" }
-    ]
-  },
-  "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["RealtimeHub"] }
-  ],
-  "observability": {
-    "enabled": true,
-    "head_sampling_rate": 1
-  },
-  "vars": {
-    "ENVIRONMENT": "development"
-  }
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "emberroot-api",
+	"compatibility_date": "2026-07-22",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"main": "./src/index.ts",
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "emberroot",
+			"database_id": "76c7319e-fb20-4425-884a-b5805bbaae07",
+			"migrations_dir": "./migrations"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "REALTIME_HUB",
+				"class_name": "RealtimeHub"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"RealtimeHub"
+			]
+		}
+	],
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 1
+	},
+	"vars": {
+		"ENVIRONMENT": "development"
+	}
 }
