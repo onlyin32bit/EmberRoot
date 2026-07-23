@@ -44,7 +44,7 @@
 		}
 		
 		return {
-			temp: latestReadings.reduce((s, t) => s + (t.temp_5 ?? 0), 0) / latestReadings.length,
+			temp: latestReadings.reduce((s, t) => s + (t.temp_5 ?? t.ambient_temp ?? 0), 0) / latestReadings.length,
 			co: latestReadings.reduce((s, t) => s + (t.co ?? 0), 0) / latestReadings.length,
 			co2: latestReadings.reduce((s, t) => s + (t.co2 ?? 0), 0) / latestReadings.length,
 			moisture: latestReadings.reduce((s, t) => s + (t.moisture ?? 0), 0) / latestReadings.length,
@@ -55,32 +55,41 @@
 	// Chart series from first node's telemetry
 	const chartData = $derived.by(() => {
 		const firstOnlineNode = onlineNodes[0];
-		if (!firstOnlineNode) return { temp: [], co: [], co2: [] };
+		if (!firstOnlineNode) return { ambientTemp: [], temp5: [], temp15: [], co: [], co2: [], ch4: [], moisture: [], ambientRh: [], battery: [] };
 		
 		const telems = telemetryData.get(firstOnlineNode.id) ?? [];
 		return {
-			temp: telems.map(t => ({ 
-				timestamp: new Date(t.received_at).getTime(), 
-				value: t.temp_5 ?? t.temp_15 ?? 0 
-			})),
-			co: telems.map(t => ({ 
-				timestamp: new Date(t.received_at).getTime(), 
-				value: t.co ?? 0 
-			})),
-			co2: telems.map(t => ({ 
-				timestamp: new Date(t.received_at).getTime(), 
-				value: t.co2 ?? 0 
-			}))
+			ambientTemp: telems.map(t => ({ timestamp: new Date(t.received_at).getTime(), value: t.ambient_temp ?? t.temp_5 ?? 0 })).reverse(),
+			temp5: telems.map(t => ({ timestamp: new Date(t.received_at).getTime(), value: t.temp_5 ?? 0 })).reverse(),
+			temp15: telems.map(t => ({ timestamp: new Date(t.received_at).getTime(), value: t.temp_15 ?? 0 })).reverse(),
+			co: telems.map(t => ({ timestamp: new Date(t.received_at).getTime(), value: t.co ?? 0 })).reverse(),
+			co2: telems.map(t => ({ timestamp: new Date(t.received_at).getTime(), value: t.co2 ?? 0 })).reverse(),
+			ch4: telems.map(t => ({ timestamp: new Date(t.received_at).getTime(), value: t.ch4 ?? 0 })).reverse(),
+			moisture: telems.map(t => ({ timestamp: new Date(t.received_at).getTime(), value: t.moisture ?? 0 })).reverse(),
+			ambientRh: telems.map(t => ({ timestamp: new Date(t.received_at).getTime(), value: t.ambient_rh ?? 0 })).reverse(),
+			battery: telems.map(t => ({ timestamp: new Date(t.received_at).getTime(), value: t.battery_pct ?? 0 })).reverse()
 		};
 	});
 
 	const tempSeries = $derived([
-		{ id: 'temperature', label: 'Temperature (°C)', data: chartData.temp, color: 'var(--ember-400)' }
+		{ id: 'ambientTemp', label: 'Ambient (°C)', data: chartData.ambientTemp, color: '#f97316' },
+		{ id: 'temp5', label: 'Soil 5cm (°C)', data: chartData.temp5, color: '#fbbf24', filled: false },
+		{ id: 'temp15', label: 'Soil 15cm (°C)', data: chartData.temp15, color: '#d97706', filled: false }
 	] as SeriesDef[]);
 
 	const gasSeries = $derived([
-		{ id: 'co', label: 'CO (ppm)', data: chartData.co, color: 'var(--status-warning)' },
-		{ id: 'co2', label: 'CO2 (ppm)', data: chartData.co2, color: 'var(--status-critical)', filled: false }
+		{ id: 'co2', label: 'CO2 (ppm)', data: chartData.co2, color: '#fb923c' },
+		{ id: 'co', label: 'CO (ppm)', data: chartData.co, color: '#facc15', filled: false },
+		{ id: 'ch4', label: 'CH4 (ppm)', data: chartData.ch4, color: '#ef4444', filled: false }
+	] as SeriesDef[]);
+
+	const environmentSeries = $derived([
+		{ id: 'moisture', label: 'Soil Moisture (%)', data: chartData.moisture, color: '#38bdf8' },
+		{ id: 'ambientRh', label: 'Ambient RH (%)', data: chartData.ambientRh, color: '#a78bfa', filled: false }
+	] as SeriesDef[]);
+
+	const healthSeries = $derived([
+		{ id: 'battery', label: 'Battery (%)', data: chartData.battery, color: '#4ade80' }
 	] as SeriesDef[]);
 
 	const now = new Date();
@@ -191,11 +200,19 @@
 	<div class="dash__charts-row">
 		<Card padding="lg" class="chart-card">
 			<h3>Temperature Trend</h3>
-			<LineAreaChart series={tempSeries} unit="°C" height={250} />
+			<LineAreaChart series={tempSeries} unit=" °C" height={250} />
 		</Card>
 		<Card padding="lg" class="chart-card">
-			<h3>Gas Levels (CO & CO2)</h3>
-			<LineAreaChart series={gasSeries} unit="ppm" height={250} />
+			<h3>Gas Levels (CO₂, CO, CH₄)</h3>
+			<LineAreaChart series={gasSeries} unit=" ppm" height={250} />
+		</Card>
+		<Card padding="lg" class="chart-card">
+			<h3>Environment (Moisture, RH)</h3>
+			<LineAreaChart series={environmentSeries} unit=" %" height={250} />
+		</Card>
+		<Card padding="lg" class="chart-card">
+			<h3>Network Health</h3>
+			<LineAreaChart series={healthSeries} unit=" %" height={250} />
 		</Card>
 	</div>
 </div>

@@ -11,8 +11,6 @@
 
 	const sensor     = $derived(data.sensor);
 	const telemetry  = $derived(data.telemetry);
-	const health     = $derived(data.health);
-	const confidence = $derived(data.confidence);
 	const alerts     = $derived(data.alerts);
 	let selectedRange = $state<'24h' | '7d' | '30d'>('24h');
 
@@ -120,11 +118,12 @@
 		if (selectedRange === '24h') {
 			return {
 				temperature: sliceHistoryRange(telemetry.history.temperature, '24h'),
+				temp5: sliceHistoryRange(telemetry.history.temp5, '24h'),
+				temp15: sliceHistoryRange(telemetry.history.temp15, '24h'),
 				humidity: sliceHistoryRange(telemetry.history.humidity, '24h'),
-				smokeIndex: sliceHistoryRange(telemetry.history.smokeIndex, '24h'),
-				windSpeed: sliceHistoryRange(telemetry.history.windSpeed, '24h'),
 				coPpm: sliceHistoryRange(telemetry.history.coPpm, '24h'),
 				co2Ppm: sliceHistoryRange(telemetry.history.co2Ppm, '24h'),
+				ch4: sliceHistoryRange(telemetry.history.ch4, '24h'),
 				soilMoisture: sliceHistoryRange(telemetry.history.soilMoisture, '24h'),
 				groundwaterLevel: sliceHistoryRange(telemetry.history.groundwaterLevel, '24h'),
 				batteryPct: sliceHistoryRange(telemetry.history.batteryPct, '24h'),
@@ -135,7 +134,11 @@
 	});
 
 	const tempSeries: SeriesDef[] = $derived(telemetry
-		? [{ id: 'temperature', label: 'Temperature', data: historySource?.temperature ?? telemetry.history.temperature, color: '#f97316' }]
+		? [
+				{ id: 'temperature', label: 'Ambient', data: historySource?.temperature ?? telemetry.history.temperature, color: '#f97316' },
+				{ id: 'temp5', label: 'Soil 5cm', data: historySource?.temp5 ?? telemetry.history.temp5, color: '#fbbf24', filled: false },
+				{ id: 'temp15', label: 'Soil 15cm', data: historySource?.temp15 ?? telemetry.history.temp15, color: '#d97706', filled: false }
+		  ]
 		: []);
 
 	const moistureSeries: SeriesDef[] = $derived(telemetry
@@ -149,7 +152,8 @@
 	const gasSeries: SeriesDef[] = $derived(telemetry
 		? [
 				{ id: 'co2Ppm', label: 'CO₂', data: historySource?.co2Ppm ?? telemetry.history.co2Ppm, color: '#fb923c' },
-				{ id: 'coPpm', label: 'CO', data: telemetry.history.coPpm, color: '#facc15', filled: false }
+				{ id: 'coPpm', label: 'CO', data: historySource?.coPpm ?? telemetry.history.coPpm, color: '#facc15', filled: false },
+				{ id: 'ch4', label: 'CH₄', data: historySource?.ch4 ?? telemetry.history.ch4, color: '#ef4444', filled: false }
 		  ]
 		: []);
 
@@ -168,13 +172,6 @@
 	const gasHeatmapValues = $derived(sampleSeries(historySource?.co2Ppm, 40));
 	const soilHeatmapValues = $derived(sampleSeries(historySource?.soilMoisture, 40));
 	const groundwaterHeatmapValues = $derived(sampleSeries(historySource?.groundwaterLevel, 40));
-
-	// Derived confidence display
-	const confScore = $derived(confidence?.score ?? 0);
-	const confLabel = $derived(confidence?.label ?? '—');
-	const confRisk = $derived(confidence?.riskLevel ?? 'low');
-	const confColor = $derived(SEVERITY_COLOR[confRisk] ?? '#6b7280');
-	const confBg = $derived(RISK_BG[confRisk] ?? 'rgba(107,114,128,0.12)');
 </script>
 
 <svelte:head>
@@ -309,6 +306,8 @@
 						<span>CO₂ {Math.round(telemetry.co2Ppm)} ppm</span>
 						<span class="chart-card__sep">·</span>
 						<span>CO {telemetry.coPpm} ppm</span>
+						<span class="chart-card__sep">·</span>
+						<span>CH₄ {telemetry.ch4} ppm</span>
 					</div>
 				</div>
 				<LineAreaChart
@@ -404,34 +403,6 @@
 			/>
 		</div>
 
-		<!-- ── Confidence score ───────────────────────────────────────────────── -->
-
-		<div class="section-label">AI Confidence Score</div>
-
-		<div class="confidence-panel">
-			<div class="confidence-score" style="color:{confColor}; background:{confBg}; border-color:{confColor}44;">
-				<div class="confidence-score__number">{confScore}</div>
-				<div class="confidence-score__label">{confLabel}</div>
-			</div>
-
-			<div class="confidence-detail">
-				<div class="confidence-detail__risk" style="color:{confColor}">
-					Risk level: <strong>{confRisk.toUpperCase()}</strong>
-				</div>
-
-				{#if confidence?.factors}
-					<div class="confidence-factors">
-						{#each Object.entries(confidence.factors) as [key, value]}
-							<div class="confidence-factor">
-								<span class="confidence-factor__key">{key.charAt(0).toUpperCase() + key.slice(1)}</span>
-								<span class="confidence-factor__val">{value}</span>
-							</div>
-						{/each}
-					</div>
-				{/if}
-			</div>
-		</div>
-
 	{:else}
 		<div class="no-telemetry">
 			<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -441,31 +412,6 @@
 			</svg>
 			<p>No telemetry data available for this sensor node.</p>
 			<small>The node may be offline or have not yet reported readings.</small>
-		</div>
-	{/if}
-
-	<!-- ── Node health ─────────────────────────────────────────────────────── -->
-
-	{#if health}
-		<div class="section-label">Node Health</div>
-
-		<div class="health-grid">
-			<div class="health-card">
-				<div class="health-card__label">Calibration</div>
-				<div class="health-card__value">{health.calibrationStatus}</div>
-			</div>
-			<div class="health-card">
-				<div class="health-card__label">Sensor Drift</div>
-				<div class="health-card__value">{health.sensorDrift.toFixed(2)}</div>
-			</div>
-			<div class="health-card">
-				<div class="health-card__label">Signal Strength</div>
-				<div class="health-card__value">{health.signalStrength} dBm</div>
-			</div>
-			<div class="health-card health-card--full">
-				<div class="health-card__label">Maintenance Recommendation</div>
-				<div class="health-card__value health-card__value--note">{health.maintenanceRecommendation}</div>
-			</div>
 		</div>
 	{/if}
 

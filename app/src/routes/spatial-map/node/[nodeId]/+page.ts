@@ -1,7 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { api } from '$lib/api/client';
 import type { PageLoad } from './$types';
-import type { NodeHealth, ConfidenceScore } from '$lib/mock';
 
 export const ssr = false;
 
@@ -47,11 +46,14 @@ export const load: PageLoad = async ({ params }) => {
 		};
 
 		telemetry = {
-			temperature: current.ambient_temp ?? 0,
+			temperature: current.ambient_temp ?? current.temp_5 ?? 0,
+			temp5: current.temp_5 ?? 0,
+			temp15: current.temp_15 ?? 0,
 			soilMoisture: current.moisture ?? 0,
 			groundwaterLevel: current.water_table ?? 0,
 			co2Ppm: current.co2 ?? 0,
 			coPpm: current.co ?? 0,
+			ch4: current.ch4 ?? 0,
 			humidity: current.ambient_rh ?? 0,
 			batteryPct: current.battery_pct ?? 0,
 			loraRssi: current.signal_rssi ?? 0,
@@ -59,44 +61,43 @@ export const load: PageLoad = async ({ params }) => {
 			
 			history: {
 				temperature: createSeries('ambient_temp'),
+				temp5: createSeries('temp_5'),
+				temp15: createSeries('temp_15'),
 				soilMoisture: createSeries('moisture'),
 				groundwaterLevel: createSeries('water_table'),
 				co2Ppm: createSeries('co2'),
 				coPpm: createSeries('co'),
+				ch4: createSeries('ch4'),
 				humidity: createSeries('ambient_rh'),
 				batteryPct: createSeries('battery_pct'),
-				signalStrength: createSeries('signal_rssi'),
-				smokeIndex: [],
-				windSpeed: []
+				signalStrength: createSeries('signal_rssi')
 			},
 			history30d: {
 				temperature: createSeries('ambient_temp'),
+				temp5: createSeries('temp_5'),
+				temp15: createSeries('temp_15'),
 				soilMoisture: createSeries('moisture'),
 				groundwaterLevel: createSeries('water_table'),
 				co2Ppm: createSeries('co2'),
 				coPpm: createSeries('co'),
+				ch4: createSeries('ch4'),
 				humidity: createSeries('ambient_rh'),
 				batteryPct: createSeries('battery_pct'),
-				signalStrength: createSeries('signal_rssi'),
-				smokeIndex: [],
-				windSpeed: []
+				signalStrength: createSeries('signal_rssi')
 			}
 		};
 	}
 
 	const rawAlerts = await api.getAlerts({ nodeId }).catch(() => []);
-	const alerts = rawAlerts.map(a => ({
+	const alerts = rawAlerts.map((a: any) => ({
 		id: a.id,
 		triggeredAt: new Date(a.created_at).getTime(),
 		category: 'system_alert',
-		severity: a.severity,
-		title: a.title,
+		severity: a.level || 'low',
+		title: a.explanation || a.id,
 		resolvedAt: a.state === 'resolved' ? Date.now() : null,
 		acknowledged: a.state === 'acknowledged'
 	}));
 
-	const health: NodeHealth | null = null;
-	const confidence: ConfidenceScore | null = null;
-
-	return { sensor, telemetry, health, confidence, alerts };
+	return { sensor, telemetry, alerts };
 };

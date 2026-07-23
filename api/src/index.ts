@@ -176,5 +176,10 @@ app.post('/api/admin/nodes', requireAdmin, async (c) => {
 
 app.notFound((c) => c.json(jsonError('Route not found', 404), 404));
 
+app.onError((err, c) => {
+	console.error('Hono Error:', err);
+	return c.json(jsonError(err.message || 'Internal Server Error', 500), 500);
+});
+
 export { RealtimeHub };
 export default app;

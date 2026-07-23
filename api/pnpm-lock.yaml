@@ -13,7 +13,7 @@ importers:
         version: 4.12.30
       mqtt:
         specifier: ^5.15.2
-        version: 5.15.2
+        version: 5.15.2(supports-color@10.2.2)
     devDependencies:
       '@cloudflare/vite-plugin':
         specifier: ^1.44.0
@@ -23,7 +23,7 @@ importers:
         version: 8.1.4(@types/node@26.1.1)(esbuild@0.28.1)
       vite-ssr-components:
         specifier: ^0.6.1
-        version: 0.6.1
+        version: 0.6.1(supports-color@10.2.2)
       wrangler:
         specifier: ^4.110.0
         version: 4.111.0
@@ -1037,7 +1037,7 @@ snapshots:
       '@babel/parser': 7.29.7
       '@babel/types': 7.29.7
 
-  '@babel/traverse@7.29.7':
+  '@babel/traverse@7.29.7(supports-color@10.2.2)':
     dependencies:
       '@babel/code-frame': 7.29.7
       '@babel/generator': 7.29.7
@@ -1045,7 +1045,7 @@ snapshots:
       '@babel/parser': 7.29.7
       '@babel/template': 7.29.7
       '@babel/types': 7.29.7
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@10.2.2)
     transitivePeerDependencies:
       - supports-color
 
@@ -1441,9 +1441,11 @@ snapshots:
 
   cookie@1.1.1: {}
 
-  debug@4.4.3:
+  debug@4.4.3(supports-color@10.2.2):
     dependencies:
       ms: 2.1.3
+    optionalDependencies:
+      supports-color: 10.2.2
 
   detect-libc@2.1.2: {}
 
@@ -1577,26 +1579,26 @@ snapshots:
 
   minimist@1.2.8: {}
 
-  mqtt-packet@9.0.2:
+  mqtt-packet@9.0.2(supports-color@10.2.2):
     dependencies:
       bl: 6.1.6
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@10.2.2)
       process-nextick-args: 2.0.1
     transitivePeerDependencies:
       - supports-color
 
-  mqtt@5.15.2:
+  mqtt@5.15.2(supports-color@10.2.2):
     dependencies:
       '@types/readable-stream': 4.0.24
       '@types/ws': 8.18.1
       commist: 3.2.0
       concat-stream: 2.0.0
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@10.2.2)
       help-me: 5.0.0
       lru-cache: 10.4.3
       minimist: 1.2.8
-      mqtt-packet: 9.0.2
-      number-allocator: 1.0.14
+      mqtt-packet: 9.0.2(supports-color@10.2.2)
+      number-allocator: 1.0.14(supports-color@10.2.2)
       readable-stream: 4.7.0
       rfdc: 1.4.1
       socks: 2.8.9
@@ -1612,9 +1614,9 @@ snapshots:
 
   nanoid@3.3.16: {}
 
-  number-allocator@1.0.14:
+  number-allocator@1.0.14(supports-color@10.2.2):
     dependencies:
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@10.2.2)
       js-sdsl: 4.3.0
     transitivePeerDependencies:
       - supports-color
@@ -1745,10 +1747,10 @@ snapshots:
 
   util-deprecate@1.0.2: {}
 
-  vite-ssr-components@0.6.1:
+  vite-ssr-components@0.6.1(supports-color@10.2.2):
     dependencies:
       '@babel/parser': 7.29.7
-      '@babel/traverse': 7.29.7
+      '@babel/traverse': 7.29.7(supports-color@10.2.2)
       picomatch: 4.0.5
     transitivePeerDependencies:
       - supports-color
