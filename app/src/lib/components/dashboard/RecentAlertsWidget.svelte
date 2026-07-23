@@ -3,15 +3,30 @@
   Scrollable list of the most recent alerts with severity, category, time.
 ───────────────────────────────────────────────────────────────────────────── -->
 <script lang="ts">
-	import { mockService } from '$lib/mock';
+	import { onMount } from 'svelte';
+	import { api, type ApiAlert } from '$lib/api';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import StatusIndicator from '$lib/components/ui/StatusIndicator.svelte';
-	import type { Alert } from '$lib/mock';
 
-	const alerts = mockService.getAlerts().slice(0, 10);
+	let alerts = $state<ApiAlert[]>([]);
+	let loading = $state(true);
+	let error = $state<string | null>(null);
 
-	function timeAgo(ts: number): string {
-		const diff = Date.now() - ts;
+	async function loadAlerts() {
+		try {
+			loading = true;
+			error = null;
+			const items = await api.getAlerts({ limit: 10 });
+			alerts = items;
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to load recent alerts';
+		} finally {
+			loading = false;
+		}
+	}
+
+	function timeAgo(ts: string): string {
+		const diff = Date.now() - new Date(ts).getTime();
 		const m = Math.floor(diff / 60_000);
 		if (m < 60) return `${m}m ago`;
 		const h = Math.floor(m / 60);
@@ -19,15 +34,17 @@
 		return `${Math.floor(h / 24)}d ago`;
 	}
 
-	function severityToStatus(s: Alert['severity']) {
-		if (s === 'critical') return 'critical' as const;
-		if (s === 'high')     return 'warning'  as const;
-		return                       'online'   as const;
+	function severityToStatus(level: ApiAlert['level']) {
+		if (level === 'warning') return 'critical' as const;
+		if (level === 'suspicious') return 'warning' as const;
+		return 'online' as const;
 	}
 
-	function categoryLabel(cat: string) {
-		return cat.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-	}
+	onMount(() => {
+		void loadAlerts();
+		const poll = window.setInterval(() => void loadAlerts(), 30_000);
+		return () => window.clearInterval(poll);
+	});
 </script>
 
 <div class="ra">
@@ -36,44 +53,48 @@
 		<a href="/alert-history" class="ra__all-link">See all</a>
 	</div>
 
-	<div class="ra__list" role="list">
-		{#each alerts as alert (alert.id)}
-			<div
-				class="ra__item"
-				class:ra__item--unread={!alert.acknowledged}
-				role="listitem"
-			>
-				<div class="ra__item-indicator">
-					<StatusIndicator
-						status={severityToStatus(alert.severity)}
-						pulse={!alert.acknowledged && alert.resolvedAt === null}
-						size="sm"
-					/>
-				</div>
-				<div class="ra__item-body">
-					<div class="ra__item-title-row">
-						<span class="ra__item-title">{alert.title}</span>
-						{#if alert.resolvedAt === null}
-							<Badge variant={alert.severity === 'critical' ? 'critical' : alert.severity === 'high' ? 'warning' : 'neutral'} size="sm">
-								Active
-							</Badge>
-						{:else}
-							<Badge variant="neutral" size="sm">Resolved</Badge>
-						{/if}
+	{#if loading}
+		<div class="ra__empty">Loading recent alerts…</div>
+	{:else if error}
+		<div class="ra__empty">{error}</div>
+	{:else if alerts.length === 0}
+		<div class="ra__empty">No alerts received yet.</div>
+	{:else}
+		<div class="ra__list" role="list">
+			{#each alerts as alert (alert.id)}
+				<div
+					class="ra__item"
+					class:ra__item--unread={alert.state === 'open'}
+					role="listitem"
+				>
+					<div class="ra__item-indicator">
+						<StatusIndicator
+							status={severityToStatus(alert.level)}
+							pulse={alert.state === 'open'}
+							size="sm"
+						/>
 					</div>
-					<div class="ra__item-meta">
-						<span class="ra__item-cat">{categoryLabel(alert.category)}</span>
-						<span class="ra__item-dot" aria-hidden="true">·</span>
-						<span class="ra__item-time">{timeAgo(alert.triggeredAt)}</span>
-						{#if !alert.acknowledged}
+					<div class="ra__item-body">
+						<div class="ra__item-title-row">
+							<span class="ra__item-title">{alert.node_name || alert.node_id}</span>
+							{#if alert.state === 'open'}
+								<Badge variant={alert.level === 'warning' ? 'critical' : alert.level === 'suspicious' ? 'warning' : 'neutral'} size="sm">
+									Open
+								</Badge>
+							{:else}
+								<Badge variant="neutral" size="sm">{alert.state}</Badge>
+							{/if}
+						</div>
+						<div class="ra__item-meta">
+							<span class="ra__item-cat">{alert.explanation}</span>
 							<span class="ra__item-dot" aria-hidden="true">·</span>
-							<span class="ra__item-unack">Unacknowledged</span>
-						{/if}
+							<span class="ra__item-time">{timeAgo(alert.created_at)}</span>
+						</div>
 					</div>
 				</div>
-			</div>
-		{/each}
-	</div>
+			{/each}
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -96,6 +117,11 @@
 	.ra__list {
 		display: flex; flex-direction: column;
 		overflow-y: auto; flex: 1;
+	}
+
+	.ra__empty {
+		font-size: 11px;
+		color: var(--text-muted);
 	}
 
 	.ra__item {
@@ -128,6 +154,6 @@
 		font-size: 10px; color: var(--text-muted);
 	}
 	.ra__item-dot { opacity: 0.5; }
-	.ra__item-cat { color: var(--text-secondary); }
+	.ra__item-cat { color: var(--text-secondary); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.ra__item-unack { color: var(--status-warning); font-weight: 500; }
 </style>

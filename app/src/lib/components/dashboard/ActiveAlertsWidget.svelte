@@ -1,26 +1,47 @@
 <!-- ActiveAlertsWidget — uses BarChart for severity breakdown -->
 <script lang="ts">
-	import { mockService } from '$lib/mock';
+	import { onMount } from 'svelte';
+	import { api, type ApiAlert } from '$lib/api';
 	import BarChart from '$lib/components/charts/BarChart.svelte';
 	import type { BarDef } from '$lib/components/charts';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import StatusIndicator from '$lib/components/ui/StatusIndicator.svelte';
 
-	const alerts   = mockService.getActiveAlerts();
-	const critical = alerts.filter(a => a.severity === 'critical').length;
-	const high     = alerts.filter(a => a.severity === 'high').length;
-	const medium   = alerts.filter(a => a.severity === 'medium').length;
-	const low      = alerts.filter(a => a.severity === 'low').length;
-	const unack    = mockService.getUnacknowledgedAlerts().length;
+	let alerts = $state<ApiAlert[]>([]);
+	let loading = $state(true);
+	let error = $state<string | null>(null);
 
-	const bars: BarDef[] = [
+	async function loadAlerts() {
+		try {
+			loading = true;
+			error = null;
+			alerts = await api.getAlerts({ limit: 200 });
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to load alerts';
+		} finally {
+			loading = false;
+		}
+	}
+
+	const critical = $derived(alerts.filter((alert) => alert.level === 'warning').length);
+	const high = $derived(alerts.filter((alert) => alert.level === 'suspicious').length);
+	const medium = $derived(alerts.filter((alert) => alert.level === 'monitoring').length);
+	const unack = $derived(alerts.filter((alert) => alert.state === 'open').length);
+
+	const bars = $derived<BarDef[]>([
 		{ id: 'critical', label: 'Critical', value: critical, color: 'var(--status-critical)', sub: 'Immediate action required' },
-		{ id: 'high',     label: 'High',     value: high,     color: 'var(--status-warning)',  sub: 'Prompt attention needed' },
-		{ id: 'medium',   label: 'Medium',   value: medium,   color: 'var(--text-secondary)',  sub: 'Monitor closely' },
-		{ id: 'low',      label: 'Low',      value: low,      color: 'var(--surface-muted)',   sub: 'Informational' },
-	];
+		{ id: 'high', label: 'High', value: high, color: 'var(--status-warning)', sub: 'Prompt attention needed' },
+		{ id: 'medium', label: 'Medium', value: medium, color: 'var(--text-secondary)', sub: 'Monitor closely' },
+		{ id: 'low', label: 'Low', value: 0, color: 'var(--surface-muted)', sub: 'Informational' },
+	]);
 
 	let selected = $state<BarDef | null>(null);
+
+	onMount(() => {
+		void loadAlerts();
+		const poll = window.setInterval(() => void loadAlerts(), 30_000);
+		return () => window.clearInterval(poll);
+	});
 </script>
 
 <div class="aa">
@@ -30,19 +51,25 @@
 				{#if critical > 0}<StatusIndicator status="critical" pulse size="md" />{/if}
 				<span class="aa__title">Active Alerts</span>
 			</div>
-			<span class="aa__subtitle">Unacknowledged: {unack}</span>
+			<span class="aa__subtitle">Open alerts: {unack}</span>
 		</div>
 		<span class="aa__total">{alerts.length}</span>
 	</div>
 
-	<BarChart {bars} orientation="horizontal" showValues
-		onBarClick={(b) => selected = selected?.id === b.id ? null : b} />
+	{#if loading}
+		<div class="aa__loading">Loading alerts…</div>
+	{:else if error}
+		<div class="aa__error">{error}</div>
+	{:else}
+		<BarChart {bars} orientation="horizontal" showValues
+			onBarClick={(b) => selected = selected?.id === b.id ? null : b} />
 
-	{#if selected}
-		<div class="aa__detail">
-			<span class="aa__detail-label">{selected.label} alerts</span>
-			<span class="aa__detail-count" style="color:{selected.color}">{selected.value}</span>
-		</div>
+		{#if selected}
+			<div class="aa__detail">
+				<span class="aa__detail-label">{selected.label} alerts</span>
+				<span class="aa__detail-count" style="color:{selected.color}">{selected.value}</span>
+			</div>
+		{/if}
 	{/if}
 
 	<div class="aa__footer">
@@ -88,4 +115,8 @@
 		transition: color var(--transition-fast);
 	}
 	.aa__link:hover { color: var(--ember-200); }
+	.aa__loading, .aa__error {
+		font-size: 11px;
+		color: var(--text-muted);
+	}
 </style>

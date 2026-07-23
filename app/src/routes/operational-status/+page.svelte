@@ -1,103 +1,93 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import PageShell from '$lib/components/PageShell.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import MetricCard from '$lib/components/ui/MetricCard.svelte';
 	import ProgressBar from '$lib/components/ui/ProgressBar.svelte';
-	import { mockService } from '$lib/mock';
+	import { api, type ApiAlert, type ApiNode, type ApiRegion } from '$lib/api';
 	import { selectedRegionId } from '$lib/stores/regionContext';
-	import type { Alert, Incident, Region, Severity, StatusLevel } from '$lib/mock';
 
 	const resolvedRegionId = $derived($selectedRegionId === 'all' ? null : $selectedRegionId);
-	const region = $derived(resolvedRegionId ? mockService.getRegion(resolvedRegionId) : null);
-	const summary = $derived.by(() => {
-		if (!resolvedRegionId) return mockService.getSummaryStats();
-		const sensors = mockService.getSensorsForRegion(resolvedRegionId);
-		const alerts = mockService.getAlertsForRegion(resolvedRegionId);
-		const incidents = mockService.getIncidentsForRegion(resolvedRegionId);
-		return {
-			totalSensors: sensors.length,
-			onlineSensors: sensors.filter((sensor) => sensor.status === 'online').length,
-			warningSensors: sensors.filter((sensor) => sensor.status === 'warning').length,
-			offlineSensors: sensors.filter((sensor) => sensor.status === 'offline').length,
-			criticalSensors: sensors.filter((sensor) => sensor.status === 'critical').length,
-			totalAlerts: alerts.length,
-			activeAlerts: alerts.filter((alert) => alert.resolvedAt === null).length,
-			unacknowledged: alerts.filter((alert) => !alert.acknowledged).length,
-			criticalAlerts: alerts.filter((alert) => alert.severity === 'critical').length,
-			totalIncidents: incidents.length,
-			activeIncidents: incidents.filter((incident) => incident.status === 'active').length,
-			containedIncidents: incidents.filter((incident) => incident.status === 'contained').length,
-			resolvedIncidents: incidents.filter((incident) => incident.status === 'resolved').length,
-			totalRegions: mockService.getRegions().length,
-			highRiskRegions: mockService.getHighRiskRegions(65).filter((risk) => risk.regionId === resolvedRegionId).length
-		};
-	});
-	const regions = $derived(
-		(resolvedRegionId
-			? [mockService.getRegion(resolvedRegionId)].filter((value): value is Region => !!value)
-			: mockService.getRegions())
-		.slice()
-		.sort((a, b) => severityWeight(b.riskLevel) - severityWeight(a.riskLevel))
-	);
-	const activeAlerts = $derived((resolvedRegionId ? mockService.getAlertsForRegion(resolvedRegionId) : mockService.getActiveAlerts()).slice(0, 5));
-	const activeIncidents = $derived((resolvedRegionId ? mockService.getIncidentsForRegion(resolvedRegionId) : mockService.getActiveIncidents()).slice(0, 4));
+	let regions = $state<ApiRegion[]>([]);
+	let nodes = $state<ApiNode[]>([]);
+	let alerts = $state<ApiAlert[]>([]);
+	let loading = $state(true);
+	let error = $state<string | null>(null);
+
+	const region = $derived(resolvedRegionId ? regions.find((item) => item.id === resolvedRegionId) ?? null : null);
+	const scopedNodes = $derived(resolvedRegionId ? nodes.filter((node) => node.region_id === resolvedRegionId) : nodes);
+	const scopedAlerts = $derived(resolvedRegionId ? alerts.filter((alert) => alert.region_id === resolvedRegionId) : alerts);
+	const summary = $derived.by(() => ({
+		totalSensors: scopedNodes.length,
+		onlineSensors: scopedNodes.filter((node) => node.status === 'online').length,
+		warningSensors: scopedNodes.filter((node) => node.status === 'warning').length,
+		offlineSensors: scopedNodes.filter((node) => node.status === 'offline').length,
+		criticalSensors: scopedNodes.filter((node) => node.status === 'critical').length,
+		totalAlerts: scopedAlerts.length,
+		activeAlerts: scopedAlerts.filter((alert) => alert.state === 'open').length,
+		criticalAlerts: scopedAlerts.filter((alert) => alert.level === 'warning').length,
+		totalRegions: regions.length,
+		highRiskRegions: regions.length
+	}));
 	const readinessScore = $derived(Math.round((summary.onlineSensors / Math.max(summary.totalSensors, 1)) * 100));
-	const commandCoverage = $derived(Math.max(60, Math.min(98, 92 - summary.unacknowledged * 3)));
+	const commandCoverage = $derived(Math.max(60, Math.min(98, 92 - summary.activeAlerts * 3)));
 	const communicationsHealth = $derived(Math.max(72, Math.min(100, 100 - summary.criticalAlerts * 4)));
+	const regionalWatchlist = $derived.by(() => {
+		const items = resolvedRegionId ? regions.filter((item) => item.id === resolvedRegionId) : regions;
+		return items.slice().sort((a, b) => b.id.localeCompare(a.id));
+	});
+	const activeAlerts = $derived(scopedAlerts.filter((alert) => alert.state === 'open').slice(0, 5));
 
-	function severityWeight(level: Severity) {
-		return level === 'critical' ? 4 : level === 'high' ? 3 : level === 'medium' ? 2 : 1;
+	async function loadData() {
+		try {
+			loading = true;
+			error = null;
+			const [regionData, nodeData, alertData] = await Promise.all([
+				api.getRegions(),
+				api.getNodes(),
+				api.getAlerts({ limit: 200 })
+			]);
+			regions = regionData;
+			nodes = nodeData;
+			alerts = alertData;
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to load operational status';
+		} finally {
+			loading = false;
+		}
 	}
 
-	function severityVariant(level: Severity): 'critical' | 'warning' | 'online' | 'neutral' {
-		if (level === 'critical') return 'critical';
-		if (level === 'high') return 'warning';
-		if (level === 'medium') return 'online';
-		return 'neutral';
-	}
+	onMount(() => {
+		void loadData();
+		const poll = window.setInterval(() => void loadData(), 30_000);
+		return () => window.clearInterval(poll);
+	});
 
-	function statusVariant(level: StatusLevel): 'critical' | 'warning' | 'online' | 'neutral' {
-		if (level === 'critical') return 'critical';
+	function statusVariant(level: 'online' | 'warning' | 'critical' | 'offline'): 'critical' | 'warning' | 'online' | 'neutral' {
+		if (level === 'critical' || level === 'offline') return 'critical';
 		if (level === 'warning') return 'warning';
-		if (level === 'online') return 'online';
-		return 'neutral';
-	}
-
-	function timeAgo(timestamp: number) {
-		const diff = Date.now() - timestamp;
-		const hours = Math.floor(diff / 3_600_000);
-		if (hours < 1) return 'Just now';
-		if (hours < 24) return `${hours}h ago`;
-		return `${Math.floor(hours / 24)}d ago`;
-	}
-
-	function alertTitle(alert: Alert) {
-		return alert.title.replace('Alert', '').trim() || alert.category.replace(/_/g, ' ');
-	}
-
-	function incidentLabel(incident: Incident) {
-		return `${incident.type.toUpperCase()} · ${incident.severity.toUpperCase()}`;
+		return 'online';
 	}
 
 	const systemStatus = [
 		{
 			name: 'Sensor Mesh',
-			status: 'online' as StatusLevel,
+			status: 'online' as const,
 			percent: readinessScore,
 			caption: `${summary.onlineSensors}/${summary.totalSensors} nodes online`
 		},
 		{
 			name: 'Field Communications',
-			status: summary.unacknowledged > 0 ? 'warning' as StatusLevel : 'online' as StatusLevel,
+			status: summary.activeAlerts > 0 ? 'warning' as const : 'online' as const,
 			percent: communicationsHealth,
-			caption: `${summary.unacknowledged} unacknowledged priorities`
+			caption: `${summary.activeAlerts} active alerts`
 		},
 		{
 			name: 'Command Coverage',
-			status: commandCoverage > 85 ? 'online' as StatusLevel : 'warning' as StatusLevel,
+			status: commandCoverage > 85 ? 'online' as const : 'warning' as const,
 			percent: commandCoverage,
-			caption: `${summary.activeIncidents} active incidents under watch`
+			caption: `${summary.criticalAlerts} critical alerts`
 		}
 	];
 </script>

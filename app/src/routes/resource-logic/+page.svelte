@@ -1,31 +1,62 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import PageShell from '$lib/components/PageShell.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import MetricCard from '$lib/components/ui/MetricCard.svelte';
 	import ProgressBar from '$lib/components/ui/ProgressBar.svelte';
-	import { mockService } from '$lib/mock';
+	import { api, type ApiAlert, type ApiNode, type ApiRegion } from '$lib/api';
 
-	const regions = mockService.getRegions();
-	const activeIncidents = mockService.getActiveIncidents();
-	const activeAlerts = mockService.getActiveAlerts();
+	let regions = $state<ApiRegion[]>([]);
+	let nodes = $state<ApiNode[]>([]);
+	let alerts = $state<ApiAlert[]>([]);
+	let loading = $state(true);
+	let error = $state<string | null>(null);
+
+	const activeAlerts = $derived(alerts.filter((alert) => alert.state === 'open').slice(0, 4));
+	const activeNodes = $derived(nodes.filter((node) => node.status === 'online' || node.status === 'warning').slice(0, 4));
+
+	async function loadData() {
+		try {
+			loading = true;
+			error = null;
+			const [regionData, nodeData, alertData] = await Promise.all([
+				api.getRegions(),
+				api.getNodes(),
+				api.getAlerts({ limit: 200 })
+			]);
+			regions = regionData;
+			nodes = nodeData;
+			alerts = alertData;
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to load resource logic';
+		} finally {
+			loading = false;
+		}
+	}
+
+	onMount(() => {
+		void loadData();
+		const poll = window.setInterval(() => void loadData(), 30_000);
+		return () => window.clearInterval(poll);
+	});
 
 	const allocations = [
-		{ id: 'alpha', label: 'Unit Alpha', region: 'R-01', load: 82, status: 'Deploying', eta: '12 min', focus: 'Containment line' },
-		{ id: 'bravo', label: 'Unit Bravo', region: 'R-03', load: 64, status: 'Holding', eta: '20 min', focus: 'Sensor relay' },
-		{ id: 'charlie', label: 'Unit Charlie', region: 'R-06', load: 91, status: 'Hot', eta: '6 min', focus: 'Evacuation support' }
+		{ id: 'alpha', label: 'Field Relay', region: 'Primary', load: 82, status: 'Deploying', eta: '12 min', focus: 'Telemetry relay' },
+		{ id: 'bravo', label: 'Node Recovery', region: 'Secondary', load: 64, status: 'Holding', eta: '20 min', focus: 'Node diagnostics' },
+		{ id: 'charlie', label: 'Command Support', region: 'Tertiary', load: 91, status: 'Hot', eta: '6 min', focus: 'Alert triage' }
 	];
 
 	const workstreams = [
-		{ title: 'Priority Firebreak', owner: 'Ops Command', progress: 74, note: 'Three crews on the western ridge' },
-		{ title: 'Sensor Mesh Refresh', owner: 'Field Techs', progress: 46, note: 'Battery swap window in progress' },
-		{ title: 'Medical Support Escort', owner: 'Med Team', progress: 88, note: 'Route clearance nearly complete' }
+		{ title: 'Telemetry integrity', owner: 'Ops Command', progress: 74, note: 'Latency and packet health under watch' },
+		{ title: 'Node service queue', owner: 'Field Techs', progress: 46, note: 'Maintenance window currently active' },
+		{ title: 'Alert triage', owner: 'Monitoring Team', progress: 88, note: 'Escalation path reviewed' }
 	];
 
 	const queueItems = [
-		{ label: 'Reassign drone coverage', detail: 'R-04 · 2 assets required' },
-		{ label: 'Stabilize comms uplink', detail: 'R-02 · Backup relay ready' },
-		{ label: 'Dispatch support convoy', detail: 'R-06 · ETA 9 min' }
+		{ label: 'Review critical alert backlog', detail: `${activeAlerts.length} alerts awaiting attention` },
+		{ label: 'Check node connectivity', detail: `${activeNodes.length} nodes in active monitoring` },
+		{ label: 'Validate region coverage', detail: `${regions.length} regions reporting` }
 	];
 </script>
 
