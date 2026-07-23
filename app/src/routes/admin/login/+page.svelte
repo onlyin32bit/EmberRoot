@@ -36,7 +36,7 @@
 	breadcrumb={['EmberRoot', 'Admin', 'Login']}
 >
 	<div class="login-container">
-		<Card padding="xl" class="login-card">
+		<Card padding="lg" class="login-card">
 			<form onsubmit={handleLogin} class="login-form">
 				{#if error}
 					<div class="error-box">

@@ -68,7 +68,11 @@ function toMapSensor(node: ApiNode): MapSensor {
 	};
 }
 
-const sensors = $derived(nodes.map((node) => toMapSensor(node)));
+const sensors = $derived(
+	nodes
+		.filter((node) => node.latitude != null && node.longitude != null)
+		.map((node) => toMapSensor(node))
+);
 
 const filteredSensors = $derived(
 	filterStatus === null
@@ -91,7 +95,7 @@ async function loadNodes() {
 			api.getNodes(resolvedRegionId ?? undefined),
 			api.getRegions()
 		]);
-		nodes = fetchedNodes.filter((node) => node.latitude !== null && node.longitude !== null);
+		nodes = fetchedNodes;
 		regions = fetchedRegions;
 	} catch (err) {
 		error = err instanceof Error ? err.message : 'Failed to load sensor nodes';
@@ -257,9 +261,9 @@ onMousePosition={updateMousePosition}
 <div class="overview-card">
 <h3>Operational overview</h3>
 <ul>
-<li><strong>{sensors.filter((sensor) => sensor.status === 'online').length}</strong> active sensors</li>
-<li><strong>{sensors.length}</strong> nodes loaded from the database</li>
-<li><strong>{sensors.filter((sensor) => sensor.status === 'warning' || sensor.status === 'critical').length}</strong> nodes requiring attention</li>
+<li><strong>{nodes.filter((n) => n.status === 'online').length}</strong> active sensors</li>
+<li><strong>{nodes.length}</strong> nodes loaded from the database</li>
+<li><strong>{nodes.filter((n) => n.status === 'warning' || n.status === 'critical').length}</strong> nodes requiring attention</li>
 <li><strong>{regions.length}</strong> monitored regions</li>
 </ul>
 </div>

@@ -31,7 +31,7 @@
 </script>
 
 <div class="drawer-content">
-	{#if sensor && telemetry}
+	{#if sensor}
 		<div class="drawer-top">
 			<div>
 				<div class="drawer-title">{sensor.name}</div>
@@ -41,27 +41,27 @@
 
 		<div class="drawer-status-row">
 			<span class="drawer-status-pill" style="color:{statusInfo?.color}; background:{statusInfo?.color}1a; border-color:{statusInfo?.color}44;">{statusInfo?.label}</span>
-			{#if health}
-				<span class="drawer-status-pill" style="color:{batteryHealth?.color}; background:{batteryHealth?.color}1a; border-color:{batteryHealth?.color}44;">{batteryHealth?.label}</span>
+			{#if batteryHealth}
+				<span class="drawer-status-pill" style="color:{batteryHealth.color}; background:{batteryHealth.color}1a; border-color:{batteryHealth.color}44;">{batteryHealth.label}</span>
 			{/if}
 		</div>
 
 		<div class="drawer-grid">
 			<div class="drawer-card">
 				<div class="drawer-card__label">Last update</div>
-				<div>{new Date(telemetry.received_at).toLocaleString()}</div>
+				<div>{telemetry ? new Date(telemetry.received_at).toLocaleString() : 'Never'}</div>
 			</div>
 			<div class="drawer-card">
 				<div class="drawer-card__label">Battery</div>
-				<div>{telemetry.battery_pct ?? '--'}%</div>
+				<div>{telemetry?.battery_pct ?? sensor.batteryPct ?? '--'}%</div>
 			</div>
 			<div class="drawer-card">
 				<div class="drawer-card__label">LoRa RSSI</div>
-				<div>{telemetry.signal_rssi ?? '--'} dBm</div>
+				<div>{telemetry?.signal_rssi ?? sensor.signalStrength ?? '--'} dBm</div>
 			</div>
 			<div class="drawer-card">
 				<div class="drawer-card__label">LoRa SNR</div>
-				<div>{telemetry.signal_snr ?? '--'} dB</div>
+				<div>{telemetry?.signal_snr ?? '--'} dB</div>
 			</div>
 			<div class="drawer-card">
 				<div class="drawer-card__label">Danger level</div>
@@ -69,7 +69,7 @@
 			</div>
 			<div class="drawer-card">
 				<div class="drawer-card__label">Humidity</div>
-				<div>{telemetry.ambient_rh != null ? telemetry.ambient_rh.toFixed(1) : '--'}%</div>
+				<div>{telemetry?.ambient_rh != null ? telemetry.ambient_rh.toFixed(1) : '--'}%</div>
 			</div>
 			<div class="drawer-card">
 				<div class="drawer-card__label">GPS</div>
@@ -91,6 +91,7 @@
 
 		<div class="drawer-section">
 			<div class="drawer-section__title">Environmental readings</div>
+			{#if telemetry}
 			<ul>
 				<li>Temperature: {telemetry.ambient_temp != null ? telemetry.ambient_temp.toFixed(1) : '--'}°C</li>
 				<li>Humidity: {telemetry.ambient_rh != null ? telemetry.ambient_rh.toFixed(1) : '--'}%</li>
@@ -99,6 +100,9 @@
 				<li>Soil moisture: {telemetry.moisture != null ? telemetry.moisture.toFixed(1) : '--'}%</li>
 				<li>Groundwater: {telemetry.water_table != null ? telemetry.water_table.toFixed(2) : '--'} m</li>
 			</ul>
+			{:else}
+			<div class="drawer-empty" style="padding-top: 4px;">No live environmental data available.</div>
+			{/if}
 		</div>
 
 		<a
@@ -137,7 +141,7 @@
 			</svg>
 		</a>
 	{:else}
-		<div class="drawer-empty">Select a sensor to inspect telemetry.</div>
+		<div class="drawer-empty">Select a sensor on the map to view details.</div>
 	{/if}
 </div>
 

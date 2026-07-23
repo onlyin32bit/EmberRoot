@@ -21,7 +21,7 @@
 	import 'leaflet.markercluster';
 	import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 	import 'leaflet.markercluster/dist/MarkerCluster.css';
-	const PUBLIC_FIRMS_MAP_KEY = (import.meta.env.PUBLIC_FIRMS_MAP_KEY as string | undefined) ?? '';
+	import { PUBLIC_FIRMS_MAP_KEY } from '$env/static/public';
 
 	let {
 	sensors = [],
