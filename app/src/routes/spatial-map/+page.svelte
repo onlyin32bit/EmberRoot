@@ -118,13 +118,13 @@ function metricAverage<K extends keyof Telemetry>(key: K) {
 </script>
 
 <svelte:head>
-<title>Spatial Map � EmberRoot</title>
-<meta name="description" content="Spatial Map � geographic deployment visualisation of U Minh Forest sensors and hotspots." />
+<title>Spatial Map — EmberRoot</title>
+<meta name="description" content="Spatial map overview for the U Minh Forest monitoring network." />
 </svelte:head>
 
 <PageShell
 title="Spatial Map"
-subtitle="Geographic deployment visualisation and spatial analysis"
+subtitle="Geographic deployment overview and analysis"
 breadcrumb={['EmberRoot', 'Spatial Map']}
 >
 <div class="spatial-grid">
@@ -132,13 +132,13 @@ breadcrumb={['EmberRoot', 'Spatial Map']}
 <div class="map-panel__header">
 <div>
 <h2>{region?.name ?? 'U Minh Forest'}</h2>
-<p>{region ? `${region.terrain.replace('_', ' ')} terrain � ${region.areaSqKm.toFixed(0)} km�` : 'Forest monitoring region'}</p>
+<p>{region ? `${region.terrain.replace('_', ' ')} terrain · ${region.areaSqKm.toFixed(0)} km²` : 'Forest monitoring region'}</p>
 </div>
 <div class="map-panel__stats">
 <div><span>{sensors.length}</span><small>Total sensors</small></div>
-<div><span>{metricAverage('temperature')}�C</span><small>Avg. temperature</small></div>
-<div><span>{metricAverage('co2Ppm')}</span><small>Avg. CO2</small></div>
-<div><span>{metricAverage('batteryPct')}%</span><small>Avg. battery</small></div>
+<div><span>{metricAverage('temperature')}°C</span><small>Average temperature</small></div>
+<div><span>{metricAverage('co2Ppm')}</span><small>Average CO₂</small></div>
+<div><span>{metricAverage('batteryPct')}%</span><small>Average battery</small></div>
 </div>
 </div>
 
@@ -179,7 +179,7 @@ onMousePosition={updateMousePosition}
 
 <section class="overview-panel">
 <div class="overview-card">
-<h3>Watch metrics</h3>
+<h3>Operational overview</h3>
 <ul>
 <li><strong>{sensors.filter((sensor) => sensor.status === 'online').length}</strong> active sensors</li>
 <li><strong>{metricAverage('temperature')}°C</strong> average temperature</li>

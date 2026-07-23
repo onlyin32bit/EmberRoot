@@ -85,6 +85,24 @@
 		}
 	}
 
+	function formatAlertLevel(level: string) {
+		switch (level) {
+			case 'warning': return 'Critical';
+			case 'suspicious': return 'Suspicious';
+			case 'monitoring': return 'Monitoring';
+			default: return 'Unknown';
+		}
+	}
+
+	function formatAlertState(state: string) {
+		switch (state) {
+			case 'open': return 'Open';
+			case 'acknowledged': return 'Acknowledged';
+			case 'resolved': return 'Resolved';
+			default: return 'Unknown';
+		}
+	}
+
 	function getStateBadgeVariant(state: string) {
 		switch (state) {
 			case 'open': return 'warning';
@@ -106,7 +124,7 @@
 	<meta name="description" content="EmberRoot alerts — view, filter, and manage active alerts from your monitoring network." />
 </svelte:head>
 
-<PageShell title="Alerts" subtitle="Manage and track alerts from your sensor network">
+<PageShell title="Alerts" subtitle="Monitor and manage alerts across your network">
 	<div class="alerts-page">
 		{#if error}
 			<Card padding="lg" class="error-card">
@@ -121,7 +139,7 @@
 
 			<div class="filter-controls">
 				<div class="filter-group">
-					<label>Level</label>
+					<span class="filter-group__label">Severity</span>
 					<div class="filter-buttons">
 						<button class:active={levelFilter === 'all'} onclick={() => levelFilter = 'all'}>
 							All ({allAlerts.length})
@@ -139,7 +157,7 @@
 				</div>
 
 				<div class="filter-group">
-					<label>State</label>
+					<span class="filter-group__label">Status</span>
 					<div class="filter-buttons">
 						<button class:active={stateFilter === 'all'} onclick={() => stateFilter = 'all'}>
 							All
@@ -161,20 +179,23 @@
 		<div class="alerts-section">
 			{#if loading}
 				<Card padding="lg">
-					<p>Loading alerts...</p>
+					<p>Loading alert feed...</p>
 				</Card>
 			{:else if filteredAlerts.length === 0}
 				<Card padding="lg" class="empty-state">
-					<p>No alerts match your filters.</p>
+					<p>No alerts match the current filters.</p>
 				</Card>
 			{:else}
 				<div class="alerts-list">
 					{#each filteredAlerts as alert (alert.id)}
-						<Card padding="md" class="alert-card" class:alert-warning={alert.level === 'warning'} class:alert-suspicious={alert.level === 'suspicious'}>
+						<Card
+							padding="md"
+							class={`alert-card${alert.level === 'warning' ? ' alert-warning' : ''}${alert.level === 'suspicious' ? ' alert-suspicious' : ''}`}
+						>
 							<div class="alert-card-header">
 								<div class="alert-card-left">
-									<Badge variant={getLevelBadgeVariant(alert.level)}>{alert.level}</Badge>
-									<Badge variant={getStateBadgeVariant(alert.state)}>{alert.state}</Badge>
+									<Badge variant={getLevelBadgeVariant(alert.level)}>{formatAlertLevel(alert.level)}</Badge>
+									<Badge variant={getStateBadgeVariant(alert.state)}>{formatAlertState(alert.state)}</Badge>
 								</div>
 								<div class="alert-card-time">
 									{new Date(alert.created_at).toLocaleString()}
@@ -207,7 +228,7 @@
 									{#if alert.state === 'open'}
 										<Button 
 											variant="secondary" 
-											size="small"
+											size="sm"
 											onclick={() => void acknowledgeAlert(alert.id)}
 										>
 											Acknowledge
@@ -215,7 +236,7 @@
 									{/if}
 									<Button 
 										variant="ghost" 
-										size="small"
+											size="sm"
 										onclick={() => goto(`/alerts/${alert.id}`)}
 									>
 										View Details
@@ -260,7 +281,7 @@
 		gap: 8px;
 	}
 
-	.filter-group label {
+	.filter-group__label {
 		font-size: 12px;
 		font-weight: 600;
 		text-transform: uppercase;
@@ -425,17 +446,17 @@
 		gap: 8px;
 	}
 
-	.empty-state {
+	:global(.empty-state) {
 		text-align: center;
 		color: var(--text-muted);
 	}
 
-	.error-card {
+	:global(.error-card) {
 		border-color: var(--status-critical);
 		background: color-mix(in srgb, var(--status-critical) 5%, transparent);
 	}
 
-	.error-card h3 {
+	:global(.error-card h3) {
 		color: var(--status-critical);
 		margin-top: 0;
 	}
