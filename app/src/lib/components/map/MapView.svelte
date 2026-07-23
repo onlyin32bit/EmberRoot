@@ -1,6 +1,21 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { mockService, type SensorNode } from '$lib/mock';
+	export interface MapSensor {
+		id: string;
+		name: string;
+		type: string;
+		regionId: string;
+		location: { lat: number; lon: number };
+		elevation: number;
+		status: string;
+		dangerLevel: 'normal' | 'monitor' | 'suspected' | 'warning';
+		batteryPct: number;
+		signalStrength: number;
+		firmwareVersion: string;
+		lastSeenAt: number;
+		deployedAt: number;
+	}
+
 	import L from 'leaflet';
 	import 'leaflet/dist/leaflet.css';
 	import 'leaflet.markercluster';
@@ -15,7 +30,7 @@
 	activeLayers = {},
 	onMousePosition = () => {}
     }: {
-        sensors?: SensorNode[];
+        sensors?: MapSensor[];
         selectedId?: string | null;
         onSelectSensor?: (id: string) => void;
         activeLayers?: Record<string, boolean>;
@@ -24,7 +39,6 @@
 
 	let map: L.Map;
 	let clusterGroup: L.MarkerClusterGroup;
-	let heatmapLayer: L.LayerGroup | null = null;
 	let hotspotLayer: L.LayerGroup | null = null;
 	let firmsLastUpdated: Date | null = $state(null);
 	let previousSelectedId: string | null = null;
@@ -62,7 +76,7 @@
 		});
 	}
 
-	function dangerLevelColor(level: SensorNode['dangerLevel']) {
+	function dangerLevelColor(level: MapSensor['dangerLevel']) {
 		const colors = {
 			normal: '#22c55e',
 			monitor: '#f59e0b',
@@ -72,7 +86,7 @@
 		return colors[level] ?? '#6b7280';
 	}
 
-	function createMarker(sensor: SensorNode) {
+	function createMarker(sensor: MapSensor) {
 		const icon = L.icon({
 			iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${sensor.status === 'offline' ? 'grey' : sensor.dangerLevel === 'warning' ? 'red' : sensor.dangerLevel === 'suspected' ? 'orange' : sensor.dangerLevel === 'monitor' ? 'gold' : 'green'}.png`,
 			shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
@@ -127,47 +141,7 @@
 		onMousePosition?.(`${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`);
 	}
 
-	function addHeatmap() {
-		const layer = L.layerGroup();
-		const fillColors = {
-			low: 'rgba(34, 197, 94, 0.24)',
-			medium: 'rgba(245, 158, 11, 0.28)',
-			high: 'rgba(249, 115, 22, 0.32)',
-			critical: 'rgba(239, 68, 68, 0.36)'
-		} as const;
 
-		for (const region of mockService.getRegions()) {
-			const risk = mockService.getRiskIndex(region.id);
-			const composite = risk?.composite ?? 0;
-			const level: keyof typeof fillColors = composite >= 75 ? 'critical' : composite >= 55 ? 'high' : composite >= 35 ? 'medium' : 'low';
-			const fillColor = fillColors[level];
-			const polygon = L.polygon(
-				[
-					[region.boundingBox.sw.lat, region.boundingBox.sw.lon],
-					[region.boundingBox.sw.lat, region.boundingBox.ne.lon],
-					[region.boundingBox.ne.lat, region.boundingBox.ne.lon],
-					[region.boundingBox.ne.lat, region.boundingBox.sw.lon],
-					[region.boundingBox.sw.lat, region.boundingBox.sw.lon]
-				],
-				{
-					color: fillColor,
-					weight: 1,
-					fillColor,
-					fillOpacity: 0.24
-				}
-			).bindPopup(`<div style="font-family:'JetBrains Mono',monospace; padding:4px 2px; min-width:180px; color:#e2e8f0;">
-				<div style="font-size:12px; font-weight:700; margin-bottom:6px; color:#f59e0b;">${region.name}</div>
-				<div style="display:grid; gap:4px; font-size:11px;">
-					<div><span style="color:#94a3b8;">Risk</span> <strong>${risk?.composite.toFixed(1) ?? '—'}</strong></div>
-					<div><span style="color:#94a3b8;">Dry days</span> <strong>${risk?.dryDays ?? '—'}</strong></div>
-					<div><span style="color:#94a3b8;">GW / moisture</span> <strong>${risk?.groundwaterLevel.toFixed(2) ?? '—'} m · ${risk?.soilMoistureAvg.toFixed(1) ?? '—'}%</strong></div>
-				</div>
-			</div>`);
-
-		layer.addLayer(polygon);
-		}
-		return layer;
-	}
 
 	// Bounding box for U Minh Region (approx W,S,E,N)
 	const UMINH_BBOX = '104.0,9.0,106.0,10.0';
@@ -260,22 +234,7 @@
 		return layer;
 	}
 
-	function setHeatmapLayer(enabled: boolean) {
-		if (!map) return;
-		if (enabled) {
-			if (!heatmapLayer) {
-				heatmapLayer = addHeatmap();
-			}
-			if (heatmapLayer && !map.hasLayer(heatmapLayer)) {
-				map.addLayer(heatmapLayer);
-			}
-			return;
-		}
 
-		if (heatmapLayer && map.hasLayer(heatmapLayer)) {
-			map.removeLayer(heatmapLayer);
-		}
-	}
 
 	async function setHotspotLayer(enabled: boolean) {
 		if (!map) return;
@@ -329,7 +288,6 @@
 
 		buildSensorLayer();
 		map.addLayer(clusterGroup);
-		setHeatmapLayer(activeLayers.riskHeatmap);
 		setHotspotLayer(activeLayers.firmsHotspots);
 
 		return () => {
@@ -350,11 +308,7 @@
         }
     });
 
-    $effect(() => {
-        if (map) {
-            setHeatmapLayer(activeLayers.riskHeatmap ?? false);
-        }
-    });
+
 
     $effect(() => {
         if (map) {
@@ -375,7 +329,7 @@
         }
     });
 
-	export function flyToSensor(sensor: SensorNode) {
+	export function flyToSensor(sensor: MapSensor) {
 		if (!map) return;
 		map.flyTo([sensor.location.lat, sensor.location.lon], 13, { duration: 0.9 });
 	}

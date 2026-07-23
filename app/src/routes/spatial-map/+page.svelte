@@ -1,6 +1,6 @@
 <script lang="ts">
 import { onMount } from 'svelte';
-import { mockService, type Telemetry, type NodeHealth, type ConfidenceScore } from '$lib/mock';
+import { api, type ApiNode, type ApiRegion, type ApiTelemetry } from '$lib/api';
 import { selectedRegionId } from '$lib/stores/regionContext';
 import PageShell from '$lib/components/PageShell.svelte';
 import SideDrawer from '$lib/components/ui/SideDrawer.svelte';
@@ -11,33 +11,64 @@ import MapLegend from '$lib/components/map/MapLegend.svelte';
 import SearchPanel from '$lib/components/map/SearchPanel.svelte';
 import FilterBar from '$lib/components/map/FilterBar.svelte';
 
-const resolvedRegionId = $derived($selectedRegionId === 'all' ? 'RG-UMINH-01' : $selectedRegionId);
-const region = $derived(mockService.getRegion(resolvedRegionId));
-const sensors = $derived(region ? mockService.getSensorsForRegion(resolvedRegionId) : []);
-const telemetryMap = $derived(new Map<string, Telemetry | undefined>(
-	sensors.map((sensor) => [sensor.id, mockService.getTelemetry(sensor.id)])
-));
-const healthMap = $derived(new Map<string, NodeHealth | undefined>(
-	sensors.map((sensor) => [sensor.id, mockService.getNodeHealth(sensor.id)])
-));
-const confidenceMap = $derived(new Map<string, ConfidenceScore | undefined>(
-	sensors.map((sensor) => [sensor.id, mockService.getConfidenceScore(sensor.id)])
-));
+type MapSensor = {
+	id: string;
+	name: string;
+	type: string;
+	regionId: string;
+	location: { lat: number; lon: number };
+	elevation: number;
+	status: ApiNode['status'];
+	dangerLevel: 'normal' | 'monitor' | 'suspected' | 'warning';
+	batteryPct: number;
+	signalStrength: number;
+	firmwareVersion: string;
+	lastSeenAt: number;
+	deployedAt: number;
+};
 
-const initialSensorId = $derived(sensors[0]?.id ?? null);
+const resolvedRegionId = $derived($selectedRegionId === 'all' ? null : $selectedRegionId);
+
+let nodes = $state<ApiNode[]>([]);
+let regions = $state<ApiRegion[]>([]);
+const region = $derived(regions.find((entry) => entry.id === resolvedRegionId) ?? null);
+let selectedNode = $state<ApiNode | null>(null);
+let selectedTelemetry = $state<ApiTelemetry | null>(null);
 let selectedSensorId = $state<string | null>(null);
-let activeLayers = $state({
-	sensorNodes: true,
-	sensorConnections: false,
-	riskHeatmap: true,
-	firmsHotspots: true,
-	groundwater: false,
-	moisture: true
-});
+let loadingNodes = $state(true);
+let loadingTelemetry = $state(false);
+let error = $state<string | null>(null);
+	let activeLayers = $state({
+		sensorNodes: true,
+		sensorConnections: false,
+		firmsHotspots: true
+	});
 let searchResults = $state<{ id: string; title: string; details: string; coords: [number, number] }[]>([]);
 let mapReady = $state(false);
 let drawerOpen = $state(false);
 let filterStatus = $state<string | null>(null);
+
+function toMapSensor(node: ApiNode): MapSensor {
+	const status = node.status ?? 'offline';
+	const dangerLevel = status === 'critical' || status === 'warning' ? 'warning' : status === 'offline' ? 'monitor' : 'normal';
+	return {
+		id: node.id,
+		name: node.name,
+		type: node.node_type,
+		regionId: node.region_id,
+		location: { lat: node.latitude ?? 0, lon: node.longitude ?? 0 },
+		elevation: 0,
+		status,
+		dangerLevel,
+		batteryPct: node.battery_pct ?? 0,
+		signalStrength: node.signal_rssi ?? -120,
+		firmwareVersion: node.firmware_version ?? 'unknown',
+		lastSeenAt: node.last_seen_at ? Date.parse(node.last_seen_at) : 0,
+		deployedAt: node.last_seen_at ? Date.parse(node.last_seen_at) : 0
+	};
+}
+
+const sensors = $derived(nodes.map((node) => toMapSensor(node)));
 
 const filteredSensors = $derived(
 	filterStatus === null
@@ -52,9 +83,39 @@ const legendItems = [
 	{ label: 'Offline', color: '#374151' }
 ];
 
-function selectSensor(id: string) {
+async function loadNodes() {
+	try {
+		loadingNodes = true;
+		error = null;
+		const [fetchedNodes, fetchedRegions] = await Promise.all([
+			api.getNodes(resolvedRegionId ?? undefined),
+			api.getRegions()
+		]);
+		nodes = fetchedNodes.filter((node) => node.latitude !== null && node.longitude !== null);
+		regions = fetchedRegions;
+	} catch (err) {
+		error = err instanceof Error ? err.message : 'Failed to load sensor nodes';
+	} finally {
+		loadingNodes = false;
+	}
+}
+
+async function selectSensor(id: string) {
 	selectedSensorId = id;
+	const node = nodes.find((entry) => entry.id === id) ?? null;
+	selectedNode = node;
+	selectedTelemetry = null;
 	drawerOpen = true;
+	if (!node) return;
+	try {
+		loadingTelemetry = true;
+		const telemetry = await api.getTelemetry(node.id, { limit: 1 });
+		selectedTelemetry = telemetry[0] ?? null;
+	} catch {
+		selectedTelemetry = null;
+	} finally {
+		loadingTelemetry = false;
+	}
 }
 
 type LayerKey = keyof typeof activeLayers;
@@ -92,27 +153,44 @@ function runSearch(query: string) {
 		}));
 }
 
-function selectSearch(item: { id: string; title: string; details: string; coords: [number, number] }) {
+async function selectSearch(item: { id: string; title: string; details: string; coords: [number, number] }) {
 	selectedSensorId = item.id;
 	searchResults = [];
 	drawerOpen = true;
+	const node = nodes.find((entry) => entry.id === item.id) ?? null;
+	selectedNode = node;
+	selectedTelemetry = null;
+	if (!node) return;
+	try {
+		loadingTelemetry = true;
+		const telemetry = await api.getTelemetry(node.id, { limit: 1 });
+		selectedTelemetry = telemetry[0] ?? null;
+	} catch {
+		selectedTelemetry = null;
+	} finally {
+		loadingTelemetry = false;
+	}
 }
 
 function closeDrawer() {
 	drawerOpen = false;
 	selectedSensorId = null;
+	selectedNode = null;
+	selectedTelemetry = null;
 }
 
 onMount(() => {
 	mapReady = true;
+	void loadNodes();
 });
 
-function metricAverage<K extends keyof Telemetry>(key: K) {
-	const values = sensors
-		.map((sensor) => telemetryMap.get(sensor.id))
-		.filter((value): value is Telemetry => !!value)
-		.map((telemetry) => telemetry[key] as number);
+$effect(() => {
+	void loadNodes();
+});
 
+function metricAverage(key: 'batteryPct' | 'signalStrength') {
+	const values = sensors
+		.map((sensor) => (key === 'batteryPct' ? sensor.batteryPct : sensor.signalStrength));
 	return values.length ? (values.reduce((sum, next) => sum + next, 0) / values.length).toFixed(1) : '—';
 }
 </script>
@@ -132,13 +210,13 @@ breadcrumb={['EmberRoot', 'Spatial Map']}
 <div class="map-panel__header">
 <div>
 <h2>{region?.name ?? 'U Minh Forest'}</h2>
-<p>{region ? `${region.terrain.replace('_', ' ')} terrain · ${region.areaSqKm.toFixed(0)} km²` : 'Forest monitoring region'}</p>
+<p>{region ? region.description ?? 'Forest monitoring region' : 'Forest monitoring region'}</p>
 </div>
 <div class="map-panel__stats">
 <div><span>{sensors.length}</span><small>Total sensors</small></div>
-<div><span>{metricAverage('temperature')}°C</span><small>Average temperature</small></div>
-<div><span>{metricAverage('co2Ppm')}</span><small>Average CO₂</small></div>
-<div><span>{metricAverage('batteryPct')}%</span><small>Average battery</small></div>
+<div><span>{loadingNodes ? '…' : metricAverage('batteryPct')}%</span><small>Average battery</small></div>
+<div><span>{loadingNodes ? '…' : metricAverage('signalStrength')} dBm</span><small>Average signal</small></div>
+<div><span>{region?.name ?? 'Live network'}</span><small>Region</small></div>
 </div>
 </div>
 
@@ -165,9 +243,7 @@ onMousePosition={updateMousePosition}
 	<LayerControl
 		layers={[
 			{ id: 'sensorNodes', label: 'Sensor Nodes', enabled: activeLayers.sensorNodes },
-			{ id: 'riskHeatmap', label: 'Fire Risk', enabled: activeLayers.riskHeatmap },
-			{ id: 'firmsHotspots', label: 'Hotspots', enabled: activeLayers.firmsHotspots },
-			{ id: 'moisture', label: 'Moisture', enabled: activeLayers.moisture }
+			{ id: 'firmsHotspots', label: 'Hotspots', enabled: activeLayers.firmsHotspots }
 		]}
 		onToggle={toggleLayer}
 	/>
@@ -182,19 +258,23 @@ onMousePosition={updateMousePosition}
 <h3>Operational overview</h3>
 <ul>
 <li><strong>{sensors.filter((sensor) => sensor.status === 'online').length}</strong> active sensors</li>
-<li><strong>{metricAverage('temperature')}°C</strong> average temperature</li>
-<li><strong>{metricAverage('humidity')}%</strong> average humidity</li>
-<li><strong>{metricAverage('co2Ppm')}</strong> average CO₂</li>
-<li><strong>{metricAverage('smokeIndex')}</strong> average smoke index</li>
+<li><strong>{sensors.length}</strong> nodes loaded from the database</li>
+<li><strong>{sensors.filter((sensor) => sensor.status === 'warning' || sensor.status === 'critical').length}</strong> nodes requiring attention</li>
+<li><strong>{regions.length}</strong> monitored regions</li>
 </ul>
 </div>
 
-<SideDrawer bind:open={drawerOpen} title={selectedSensorId ? `Sensor ${selectedSensorId}` : 'Sensor details'} width="md" onclose={closeDrawer}>
+{#if error}
+<div class="overview-card">
+<h3>Map data issue</h3>
+<p>{error}</p>
+</div>
+{/if}
+
+		<SideDrawer bind:open={drawerOpen} title={selectedSensorId ? `Sensor ${selectedSensorId}` : 'Sensor details'} width="md" onclose={closeDrawer}>
 			<TelemetryDrawer
-				sensor={selectedSensorId ? mockService.getSensor(selectedSensorId) ?? null : null}
-				telemetry={selectedSensorId ? telemetryMap.get(selectedSensorId) ?? null : null}
-				health={selectedSensorId ? healthMap.get(selectedSensorId) ?? null : null}
-				confidence={selectedSensorId ? confidenceMap.get(selectedSensorId) ?? null : null}
+				sensor={sensors.find(s => s.id === selectedSensorId) ?? null}
+				telemetry={selectedTelemetry}
 			/>
 		</SideDrawer>
 </section>

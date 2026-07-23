@@ -1,21 +1,13 @@
 <script lang="ts">
-	import type {
-		SensorNode,
-		Telemetry,
-		NodeHealth,
-		ConfidenceScore
-	} from '$lib/mock';
+	import type { MapSensor } from './MapView.svelte';
+	import type { ApiTelemetry } from '$lib/api/types';
 
 	let {
 		sensor = null,
-		telemetry = null,
-		health = null,
-		confidence = null
+		telemetry = null
 	}: {
-		sensor?: SensorNode | null;
-		telemetry?: Telemetry | null;
-		health?: NodeHealth | null;
-		confidence?: ConfidenceScore | null;
+		sensor?: MapSensor | null;
+		telemetry?: ApiTelemetry | null;
 	} = $props();
 
 	function statusTone(status: string) {
@@ -35,7 +27,7 @@
 	}
 
 	const statusInfo = $derived(sensor ? statusTone(sensor.status) : null);
-	const batteryHealth = $derived(telemetry ? healthTone(telemetry.batteryPct) : null);
+	const batteryHealth = $derived(telemetry?.battery_pct != null ? healthTone(telemetry.battery_pct) : null);
 </script>
 
 <div class="drawer-content">
@@ -45,33 +37,7 @@
 				<div class="drawer-title">{sensor.name}</div>
 				<div class="drawer-subtitle">{sensor.id} • {sensor.regionId}</div>
 			</div>
-			<div class="drawer-score" style="color:{statusInfo?.color}">{confidence?.score ?? 0}<span>Confidence</span></div>
 		</div>
-
-		{#if confidence?.explanation?.length}
-			<div class="drawer-section">
-				<div class="drawer-section__title">Explainable alert rationale</div>
-				<ul>
-					{#each confidence.explanation as item}
-						<li>{item}</li>
-					{/each}
-				</ul>
-			</div>
-		{/if}
-
-		{#if confidence?.factors}
-			<div class="drawer-section">
-				<div class="drawer-section__title">Signal factors</div>
-				<div class="drawer-factor-grid">
-					{#each Object.entries(confidence.factors) as [key, value]}
-						<div class="drawer-factor-pill">
-							<span>{key}</span>
-							<strong>{value}</strong>
-						</div>
-					{/each}
-				</div>
-			</div>
-		{/if}
 
 		<div class="drawer-status-row">
 			<span class="drawer-status-pill" style="color:{statusInfo?.color}; background:{statusInfo?.color}1a; border-color:{statusInfo?.color}44;">{statusInfo?.label}</span>
@@ -83,19 +49,19 @@
 		<div class="drawer-grid">
 			<div class="drawer-card">
 				<div class="drawer-card__label">Last update</div>
-				<div>{new Date(telemetry.timestamp).toLocaleString()}</div>
+				<div>{new Date(telemetry.received_at).toLocaleString()}</div>
 			</div>
 			<div class="drawer-card">
 				<div class="drawer-card__label">Battery</div>
-				<div>{telemetry.batteryPct}%</div>
+				<div>{telemetry.battery_pct ?? '--'}%</div>
 			</div>
 			<div class="drawer-card">
 				<div class="drawer-card__label">LoRa RSSI</div>
-				<div>{telemetry.loraRssi} dBm</div>
+				<div>{telemetry.signal_rssi ?? '--'} dBm</div>
 			</div>
 			<div class="drawer-card">
 				<div class="drawer-card__label">LoRa SNR</div>
-				<div>{telemetry.loraSnr} dB</div>
+				<div>{telemetry.signal_snr ?? '--'} dB</div>
 			</div>
 			<div class="drawer-card">
 				<div class="drawer-card__label">Danger level</div>
@@ -103,7 +69,7 @@
 			</div>
 			<div class="drawer-card">
 				<div class="drawer-card__label">Humidity</div>
-				<div>{telemetry.humidity.toFixed(1)}%</div>
+				<div>{telemetry.ambient_rh != null ? telemetry.ambient_rh.toFixed(1) : '--'}%</div>
 			</div>
 			<div class="drawer-card">
 				<div class="drawer-card__label">GPS</div>
@@ -115,7 +81,7 @@
 			</div>
 			<div class="drawer-card">
 				<div class="drawer-card__label">Firmware</div>
-				<div>{health?.firmwareVersion ?? sensor.firmwareVersion}</div>
+				<div>{sensor.firmwareVersion}</div>
 			</div>
 			<div class="drawer-card">
 				<div class="drawer-card__label">Deployed</div>
@@ -126,27 +92,14 @@
 		<div class="drawer-section">
 			<div class="drawer-section__title">Environmental readings</div>
 			<ul>
-				<li>Temperature: {telemetry.temperature.toFixed(1)}°C</li>
-				<li>Humidity: {telemetry.humidity.toFixed(1)}%</li>
-				<li>CO₂: {Math.round(telemetry.co2Ppm)} ppm</li>
-				<li>CO: {telemetry.coPpm} ppm</li>
-				<li>Soil moisture: {telemetry.soilMoisture.toFixed(1)}%</li>
-				<li>Groundwater: {telemetry.groundwaterLevel.toFixed(2)} m</li>
+				<li>Temperature: {telemetry.ambient_temp != null ? telemetry.ambient_temp.toFixed(1) : '--'}°C</li>
+				<li>Humidity: {telemetry.ambient_rh != null ? telemetry.ambient_rh.toFixed(1) : '--'}%</li>
+				<li>CO₂: {telemetry.co2 != null ? Math.round(telemetry.co2) : '--'} ppm</li>
+				<li>CO: {telemetry.co != null ? telemetry.co.toFixed(1) : '--'} ppm</li>
+				<li>Soil moisture: {telemetry.moisture != null ? telemetry.moisture.toFixed(1) : '--'}%</li>
+				<li>Groundwater: {telemetry.water_table != null ? telemetry.water_table.toFixed(2) : '--'} m</li>
 			</ul>
 		</div>
-
-		{#if health}
-			<div class="drawer-section">
-				<div class="drawer-section__title">Node health</div>
-				<ul>
-					<li>Firmware: {health.firmwareVersion}</li>
-					<li>Calibration: {health.calibrationStatus}</li>
-					<li>Drift: {health.sensorDrift.toFixed(2)}</li>
-					<li>Recommendation: {health.maintenanceRecommendation}</li>
-					<li>Deployed: {new Date(sensor.deployedAt).toLocaleDateString()}</li>
-				</ul>
-			</div>
-		{/if}
 
 		<a
 			href="/spatial-map/node/{sensor.id}"
