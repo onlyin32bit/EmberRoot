@@ -81,7 +81,8 @@ export async function verifyAdminToken(token: string, env: Bindings): Promise<Ad
 }
 
 export function credentialsMatch(username: string, password: string, env: Bindings): boolean {
-	return timingSafeEqual(username, env.ADMIN_USERNAME || 'admin') && timingSafeEqual(password, env.ADMIN_PASSWORD || 'admin');
+	if (!env.ADMIN_USERNAME || !env.ADMIN_PASSWORD) return false;
+	return timingSafeEqual(username, env.ADMIN_USERNAME) && timingSafeEqual(password, env.ADMIN_PASSWORD);
 }
 
 export function ingestKeyMatches(value: string | undefined, env: Bindings): boolean {
